@@ -12,6 +12,8 @@
     "@colony/shared": "*",
     "@tanstack/react-query": "^5.62.8",
     "clsx": "^2.1.1",
+    "ioredis": "^5.11.1",
+    "jose": "^6.2.17",
     "lucide-react": "^0.468.0",
     "next": "15.1.0",
     "react": "^19.0.0",
@@ -29,4 +31,3 @@
     "typescript": "^5.7.2"
   }
 }
-

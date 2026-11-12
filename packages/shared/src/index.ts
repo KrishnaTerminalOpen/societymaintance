@@ -10,3 +10,15 @@ export * from './schemas/notification.schema';
 export * from './schemas/audit-log.schema';
 export * from './schemas/settings.schema';
 
+// Module 2: Authentication & RBAC Exports
+export * from './auth/types';
+export * from './auth/redis-store';
+export * from './auth/jwt';
+export * from './auth/rbac';
+export * from './auth/otp.service';
+export * from './auth/session.service';
+export * from './auth/sms/sms-provider.interface';
+export * from './auth/sms/msg91.provider';
+export * from './auth/sms/twilio.provider';
+export * from './auth/sms/console.provider';
+export * from './auth/sms/sms-provider.factory';
