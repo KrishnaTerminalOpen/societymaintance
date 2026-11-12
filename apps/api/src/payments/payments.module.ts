@@ -9,9 +9,11 @@ import { StuckPaymentsPollerJob } from './jobs/stuck-payments.job';
 
 @Module({
   imports: [
-    BullModule.registerQueue({
-      name: 'payment-webhooks',
-    }),
+    BullModule.registerQueue(
+      { name: 'payment-webhooks' },
+      { name: 'receipts-queue' },
+      { name: 'notifications-queue' },
+    ),
   ],
   controllers: [PaymentsController, WebhooksController],
   providers: [

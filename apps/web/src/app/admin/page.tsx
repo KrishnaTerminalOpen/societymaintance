@@ -30,6 +30,10 @@ import {
   FileText,
   X,
   Lock,
+  Bell,
+  Send,
+  Radio,
+  Layers,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -49,6 +53,7 @@ type AdminTab =
   | 'RECORD_OFFLINE'
   | 'SETTINGS'
   | 'AUDIT_LOGS'
+  | 'REMINDERS_QUEUES'
   | 'ADMINS';
 
 export default function AdminPortalPage() {
@@ -108,6 +113,14 @@ export default function AdminPortalPage() {
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminRole, setNewAdminRole] = useState('ADMIN');
   const [adminMgmtError, setAdminMgmtError] = useState<string | null>(null);
+
+  // Reminders & BullMQ Queue state
+  const [bulkBlock, setBulkBlock] = useState('ALL');
+  const [bulkStatus, setBulkStatus] = useState('ALL');
+  const [bulkChannel, setBulkChannel] = useState('ALL');
+  const [bulkBatchSize, setBulkBatchSize] = useState(10);
+  const [bulkDelaySeconds, setBulkDelaySeconds] = useState(3);
+  const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
 
   // ============================================================================
   // Fetch Current Admin Context
@@ -236,8 +249,80 @@ export default function AdminPortalPage() {
   });
 
   // ============================================================================
+  // Fetch Failed DLQ Jobs
+  // ============================================================================
+  const { data: failedJobsData, isLoading: isFailedJobsLoading, refetch: refetchFailedJobs } = useQuery({
+    queryKey: ['admin-failed-jobs-list'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/failed-jobs');
+      if (!res.ok) throw new Error('Failed to fetch failed jobs');
+      return res.json();
+    },
+    enabled: activeTab === 'REMINDERS_QUEUES',
+  });
+
+  // ============================================================================
   // Mutations
   // ============================================================================
+  const bulkRemindersMutation = useMutation({
+    mutationFn: async (payload: any) => {
+      const res = await fetch('/api/admin/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to dispatch reminders');
+      return data;
+    },
+    onSuccess: (data) => {
+      setReminderFeedback(data.message);
+      queryClient.invalidateQueries({ queryKey: ['admin-failed-jobs-list'] });
+      setTimeout(() => setReminderFeedback(null), 8000);
+    },
+    onError: (err: any) => {
+      alert(`Error dispatching reminders: ${err.message}`);
+    },
+  });
+
+  const retryFailedJobMutation = useMutation({
+    mutationFn: async (notificationId: string) => {
+      const res = await fetch('/api/admin/failed-jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to retry job');
+      return data;
+    },
+    onSuccess: () => {
+      refetchFailedJobs();
+      alert('Job retried and re-queued successfully!');
+    },
+    onError: (err: any) => {
+      alert(`Retry failed: ${err.message}`);
+    },
+  });
+
+  const singleReminderMutation = useMutation({
+    mutationFn: async (userId: string) => {
+      const res = await fetch('/api/admin/reminders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send reminder');
+      return data;
+    },
+    onSuccess: (data) => {
+      alert(data.message || 'Reminder sent successfully');
+    },
+    onError: (err: any) => {
+      alert(`Error: ${err.message}`);
+    },
+  });
   const logoutMutation = useMutation({
     mutationFn: async () => {
       await fetch('/api/auth/logout', { method: 'POST' });
@@ -465,6 +550,18 @@ export default function AdminPortalPage() {
           >
             <FileSpreadsheet className="h-4 w-4" />
             <span>Audit Trail</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('REMINDERS_QUEUES')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+              activeTab === 'REMINDERS_QUEUES'
+                ? 'bg-amber-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <Bell className="h-4 w-4" />
+            <span>Reminders &amp; Workers</span>
           </button>
 
           <button
@@ -1463,6 +1560,276 @@ export default function AdminPortalPage() {
               </div>
             </div>
           )}
+
+          {/* ====================================================================
+              8. TAB: REMINDERS & BULLMQ QUEUES (DLQ)
+          ==================================================================== */}
+          {activeTab === 'REMINDERS_QUEUES' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-xl font-extrabold text-slate-900">Reminders &amp; Background Workers</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  BullMQ distributed workers for PDF receipts, multi-channel reminders, and Dead-Letter Queue (DLQ)
+                </p>
+              </div>
+
+              {/* Status Alert / Feedback */}
+              {reminderFeedback && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center space-x-3 text-emerald-800 text-xs font-semibold">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                  <span>{reminderFeedback}</span>
+                </div>
+              )}
+
+              {/* Architecture & Worker Health Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Receipts Queue</span>
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
+                  <div className="font-bold text-slate-900 text-sm">Branded PDF Engine</div>
+                  <p className="text-[11px] text-slate-500">
+                    Generates official PDF receipts and stores to Cloudflare R2 / S3 automatically upon payment.
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Notifications Queue</span>
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
+                  <div className="font-bold text-slate-900 text-sm">Multi-Channel Router</div>
+                  <p className="text-[11px] text-slate-500">
+                    Dispatches OTP, payment confirmations, and reminders via SMS, Resend/SendGrid, &amp; WhatsApp.
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Reminders Queue</span>
+                    <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                  </div>
+                  <div className="font-bold text-slate-900 text-sm">Batching &amp; Anti-Spike</div>
+                  <p className="text-[11px] text-slate-500">
+                    Staggers bulk messages with progressive batch delays to protect carrier rate limits.
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Dead-Letter Queue</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                      (failedJobsData?.count || 0) > 0 ? 'bg-rose-100 text-rose-800' : 'bg-emerald-100 text-emerald-800'
+                    }`}>
+                      {failedJobsData?.count || 0} Failed
+                    </span>
+                  </div>
+                  <div className="font-bold text-slate-900 text-sm">Exponential Retries</div>
+                  <p className="text-[11px] text-slate-500">
+                    5 automatic retry attempts with backoff before entering DLQ. Payment settlement is always preserved.
+                  </p>
+                </div>
+              </div>
+
+              {/* Bulk Reminders Staggered Dispatcher */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-sm space-y-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Send Staggered Bulk Deposit Reminders</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Sends reminders in sequential batches with configurable delay to prevent notification provider spikes
+                    </p>
+                  </div>
+                  <span className="px-3 py-1 bg-amber-50 text-amber-800 rounded-lg text-xs font-bold border border-amber-200">
+                    Batch Delay Active
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Target Block</label>
+                    <select
+                      value={bulkBlock}
+                      onChange={(e) => setBulkBlock(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:border-blue-600 bg-white"
+                    >
+                      <option value="ALL">All Blocks (A, B, C, D)</option>
+                      <option value="A">Block A Only</option>
+                      <option value="B">Block B Only</option>
+                      <option value="C">Block C Only</option>
+                      <option value="D">Block D Only</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Deposit Status</label>
+                    <select
+                      value={bulkStatus}
+                      onChange={(e) => setBulkStatus(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:border-blue-600 bg-white"
+                    >
+                      <option value="ALL">All Unpaid (Pending + Overdue)</option>
+                      <option value="OVERDUE">Overdue Only (Urgent Warning)</option>
+                      <option value="PENDING">Pending Only (Standard Reminder)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Notification Channels</label>
+                    <select
+                      value={bulkChannel}
+                      onChange={(e) => setBulkChannel(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:border-blue-600 bg-white"
+                    >
+                      <option value="ALL">All Channels (SMS + Email + WhatsApp)</option>
+                      <option value="SMS">SMS Only</option>
+                      <option value="EMAIL">Email Only</option>
+                      <option value="WHATSAPP">WhatsApp Only</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Batch Chunk Size</label>
+                    <select
+                      value={bulkBatchSize}
+                      onChange={(e) => setBulkBatchSize(Number(e.target.value))}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:border-blue-600 bg-white"
+                    >
+                      <option value={5}>5 households / batch</option>
+                      <option value={10}>10 households / batch</option>
+                      <option value={20}>20 households / batch</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Delay Between Batches</label>
+                    <select
+                      value={bulkDelaySeconds}
+                      onChange={(e) => setBulkDelaySeconds(Number(e.target.value))}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-semibold focus:outline-none focus:border-blue-600 bg-white"
+                    >
+                      <option value={2}>2 seconds</option>
+                      <option value={3}>3 seconds (Standard)</option>
+                      <option value={5}>5 seconds</option>
+                      <option value={10}>10 seconds</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="text-xs text-slate-500">
+                    💡 Reminders contain direct mobile payment links and computed deposit balances.
+                  </div>
+                  <button
+                    onClick={() =>
+                      bulkRemindersMutation.mutate({
+                        block: bulkBlock,
+                        depositStatus: bulkStatus,
+                        channel: bulkChannel,
+                        batchSize: bulkBatchSize,
+                        delayBetweenBatchesSeconds: bulkDelaySeconds,
+                      })
+                    }
+                    disabled={bulkRemindersMutation.isPending}
+                    className="w-full sm:w-auto h-11 px-6 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
+                  >
+                    <Send className="h-4 w-4" />
+                    <span>{bulkRemindersMutation.isPending ? 'Scheduling Batches...' : 'Dispatch Staggered Reminders'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Dead-Letter Queue (DLQ) & Failed Jobs Inspector */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <AlertTriangle className="h-5 w-5 text-rose-600" />
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">Dead-Letter Queue (DLQ) &amp; Failed Jobs</h4>
+                      <p className="text-[11px] text-slate-500">
+                        Notification delivery failures that exceeded 5 retry attempts. Payments remain settled.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => refetchFailedJobs()}
+                    className="h-8 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 flex items-center space-x-1"
+                  >
+                    <RotateCw className="h-3.5 w-3.5" />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+
+                {isFailedJobsLoading ? (
+                  <div className="p-8 text-center text-xs text-slate-400">Inspecting Dead-Letter Queue...</div>
+                ) : !failedJobsData?.data || failedJobsData.data.length === 0 ? (
+                  <div className="p-8 text-center space-y-2">
+                    <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                    <div className="text-sm font-bold text-slate-900">All Worker Queues Running Healthy</div>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      There are currently 0 failed jobs in the Dead-Letter Queue. All receipts and notification dispatches have processed cleanly.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                        <tr>
+                          <th className="py-3 px-4">Recipient</th>
+                          <th className="py-3 px-4">Channel</th>
+                          <th className="py-3 px-4">Notification Type</th>
+                          <th className="py-3 px-4">Failure Reason / Trace</th>
+                          <th className="py-3 px-4">Failed At</th>
+                          <th className="py-3 px-4 text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        {failedJobsData.data.map((job: any) => (
+                          <tr key={job.id} className="hover:bg-slate-50/50">
+                            <td className="py-3 px-4">
+                              <div className="font-bold text-slate-900">{job.recipient}</div>
+                              <div className="text-[10px] text-slate-500">{job.phone}</div>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                                {job.channel}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                                {job.type}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 max-w-xs truncate text-[11px] text-rose-600 font-mono">
+                              {job.metadata?.error || job.message || 'Carrier delivery timeout'}
+                            </td>
+                            <td className="py-3 px-4 text-slate-500 text-[11px]">
+                              {new Date(job.failedAt).toLocaleTimeString('en-IN', {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                day: '2-digit',
+                                month: 'short',
+                              })}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                onClick={() => retryFailedJobMutation.mutate(job.id)}
+                                disabled={retryFailedJobMutation.isPending}
+                                className="h-8 px-3 rounded-lg bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold text-xs transition-colors"
+                              >
+                                Retry Job
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -1696,6 +2063,16 @@ export default function AdminPortalPage() {
         >
           <Users className="h-5 w-5" />
           <span className="text-[10px]">Units</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('REMINDERS_QUEUES')}
+          className={`flex-1 h-full flex flex-col items-center justify-center space-y-1 ${
+            activeTab === 'REMINDERS_QUEUES' ? 'text-amber-400 font-bold' : ''
+          }`}
+        >
+          <Bell className="h-5 w-5" />
+          <span className="text-[10px]">Reminders</span>
         </button>
 
         <button

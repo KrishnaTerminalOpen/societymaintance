@@ -5,7 +5,10 @@ import {
   ConflictException,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
+import { Queue } from 'bullmq';
+import { InjectQueue } from '@nestjs/bullmq';
 import { prisma, PaymentStatus, DepositStatus, PaymentMethod, AuditAction } from '@colony/database';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
 import { formatPaiseToINR, UserRole } from '@colony/shared';
@@ -35,7 +38,11 @@ export interface AuthContext {
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
 
-  constructor(private readonly gateway: RazorpayGateway) {}
+  constructor(
+    private readonly gateway: RazorpayGateway,
+    @Optional() @InjectQueue('receipts-queue') private readonly receiptsQueue?: Queue,
+    @Optional() @InjectQueue('notifications-queue') private readonly notificationsQueue?: Queue,
+  ) {}
 
   /**
    * 1. POST /payments/create-order
@@ -248,7 +255,7 @@ export class PaymentsService {
     }
 
     // 3. Database Transaction with Concurrency & Overpayment Protection
-    return await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       // Re-fetch payment inside transaction to guarantee freshest state
       const currentPayment = await tx.payment.findUnique({
         where: { id: payment.id },
@@ -466,6 +473,24 @@ export class PaymentsService {
         excessRefunded: Number(excessPaise),
       };
     });
+
+    // 4. Asynchronously enqueue PDF Receipt Generation & Notification (Non-blocking)
+    if (result.success && result.paymentId && this.receiptsQueue) {
+      try {
+        await this.receiptsQueue.add(
+          'generate-receipt',
+          { paymentId: result.paymentId },
+          {
+            attempts: 5,
+            backoff: { type: 'exponential', delay: 2000 },
+          },
+        );
+      } catch (queueErr: any) {
+        this.logger.error(`Failed to enqueue receipt generation job: ${queueErr.message}`);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -517,17 +542,67 @@ export class PaymentsService {
       const orderId = paymentEntity.order_id;
       if (!orderId) return;
 
+      const failedPayment = await prisma.payment.findFirst({
+        where: { gatewayOrderId: orderId },
+      });
+
       await prisma.payment.updateMany({
         where: { gatewayOrderId: orderId, status: PaymentStatus.CREATED },
         data: { status: PaymentStatus.FAILED },
       });
 
       this.logger.warn(`Webhook: Payment marked as FAILED for order ${orderId}`);
+
+      if (this.notificationsQueue && failedPayment?.userId) {
+        try {
+          await this.notificationsQueue.add(
+            'dispatch-notification',
+            {
+              userId: failedPayment.userId,
+              type: 'PAYMENT_FAILED',
+              channel: 'ALL',
+              metadata: {
+                amountPaise: Number(failedPayment.amount),
+                reason: paymentEntity.error_description || 'Payment failed at gateway',
+              },
+            },
+            { attempts: 5, backoff: { type: 'exponential', delay: 2000 } },
+          );
+        } catch (err: any) {
+          this.logger.error(`Failed to enqueue payment.failed notification: ${err.message}`);
+        }
+      }
     } else if (eventType === 'refund.processed') {
       const refundEntity = event.payload.refund?.entity;
       if (!refundEntity) return;
 
       this.logger.log(`Webhook: Refund processed for ${refundEntity.payment_id}`);
+
+      if (this.notificationsQueue) {
+        const paymentRecord = await prisma.payment.findFirst({
+          where: { gatewayPaymentId: refundEntity.payment_id },
+        });
+
+        if (paymentRecord?.userId) {
+          try {
+            await this.notificationsQueue.add(
+              'dispatch-notification',
+              {
+                userId: paymentRecord.userId,
+                type: 'REFUND_PROCESSED',
+                channel: 'ALL',
+                metadata: {
+                  amountPaise: refundEntity.amount,
+                  gatewayRefundId: refundEntity.id,
+                },
+              },
+              { attempts: 5, backoff: { type: 'exponential', delay: 2000 } },
+            );
+          } catch (err: any) {
+            this.logger.error(`Failed to enqueue refund notification: ${err.message}`);
+          }
+        }
+      }
     }
   }
 

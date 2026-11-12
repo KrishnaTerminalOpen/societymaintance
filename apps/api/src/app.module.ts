@@ -5,6 +5,9 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PaymentsModule } from './payments/payments.module';
+import { StorageModule } from './storage/storage.module';
+import { NotificationsModule } from './notifications/notifications.module';
+import { ReceiptsModule } from './receipts/receipts.module';
 
 @Module({
   imports: [
@@ -20,6 +23,9 @@ import { PaymentsModule } from './payments/payments.module';
         password: process.env.REDIS_PASSWORD || undefined,
       },
     }),
+    StorageModule,
+    NotificationsModule,
+    ReceiptsModule,
     PaymentsModule,
   ],
   controllers: [AppController],

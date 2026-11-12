@@ -75,8 +75,10 @@ enum RefundStatus {
 }
 
 enum NotificationType {
+  OTP
   PAYMENT_DUE
   PAYMENT_SUCCESS
+  PAYMENT_FAILED
   PAYMENT_OVERDUE
   REFUND_PROCESSED
   SYSTEM_ALERT
