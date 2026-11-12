@@ -5,12 +5,24 @@ const DEFAULT_ACCESS_SECRET = 'colony-deposit-dev-jwt-access-secret-key-32chars'
 const DEFAULT_REFRESH_SECRET = 'colony-deposit-dev-jwt-refresh-secret-key-32chars';
 
 function getAccessKey(secret?: string): Uint8Array {
-  const secretStr = secret || process.env.JWT_ACCESS_SECRET || DEFAULT_ACCESS_SECRET;
+  const secretStr = secret || process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET;
+  if (!secretStr) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CRITICAL SECURITY ERROR: JWT_ACCESS_SECRET or JWT_SECRET must be set in production.');
+    }
+    return new TextEncoder().encode(DEFAULT_ACCESS_SECRET);
+  }
   return new TextEncoder().encode(secretStr);
 }
 
 function getRefreshKey(secret?: string): Uint8Array {
-  const secretStr = secret || process.env.JWT_REFRESH_SECRET || DEFAULT_REFRESH_SECRET;
+  const secretStr = secret || process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+  if (!secretStr) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('CRITICAL SECURITY ERROR: JWT_REFRESH_SECRET or JWT_SECRET must be set in production.');
+    }
+    return new TextEncoder().encode(DEFAULT_REFRESH_SECRET);
+  }
   return new TextEncoder().encode(secretStr);
 }
 

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, PaymentStatus, DepositStatus, AuditAction } from '@colony/database';
+
+const ResyncReconciliationSchema = z.object({
+  gatewayPaymentId: z.string().min(1, 'gatewayPaymentId is required').max(128),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -108,11 +113,12 @@ export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuth(req, ['ADMIN', 'SUPER_ADMIN']);
     const body = await req.json();
-    const { gatewayPaymentId } = body;
+    const parsed = ResyncReconciliationSchema.safeParse(body);
 
-    if (!gatewayPaymentId) {
+    if (!parsed.success) {
       return NextResponse.json({ error: 'gatewayPaymentId is required' }, { status: 400 });
     }
+    const { gatewayPaymentId } = parsed.data;
 
     // One-click Re-sync: Find matching payment or attach to deposit
     const result = await prisma.$transaction(async (tx) => {

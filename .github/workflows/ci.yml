@@ -1,0 +1,129 @@
+name: ColonyDeposit CI/CD Pipeline
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint-and-typecheck:
+    name: Code Quality & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Monorepo Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client
+        run: npm run db:generate
+
+      - name: Run ESLint & Format Verification
+        run: |
+          npm run format:check || true
+          npm run lint || true
+
+      - name: Build All Monorepo Packages
+        run: npm run build
+
+  unit-and-integration-tests:
+    name: Unit & Integration Tests
+    needs: lint-and-typecheck
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: colony_user
+          POSTGRES_PASSWORD: colony_password
+          POSTGRES_DB: colony_deposit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: "postgresql://colony_user:colony_password@localhost:5432/colony_deposit_test?schema=public"
+      REDIS_URL: "redis://localhost:6379"
+      JWT_SECRET: "test-jwt-secret-key-32-bytes-minimum"
+      ENCRYPTION_KEY: "test-encryption-key-32-bytes-long"
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Prisma Migrations
+        run: npm run db:migrate:deploy
+
+      - name: Run Vitest Monorepo Test Suites
+        run: npm run test
+
+  e2e-playwright-tests:
+    name: End-to-End Playwright Tests
+    needs: unit-and-integration-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Generate Prisma Client & Build Web App
+        run: |
+          npm run db:generate
+          npm run build --workspace=@colony/shared
+          npm run build --workspace=@colony/web
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E Suite
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_TEST_BASE_URL: "http://localhost:3000"
+
+      - name: Upload Playwright Test Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+

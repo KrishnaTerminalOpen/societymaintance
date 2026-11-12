@@ -5,6 +5,32 @@ const ACCESS_COOKIE_NAME = 'colony_access_token';
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const method = req.method.toUpperCase();
+
+  // 1. CSRF Protection for state-modifying API requests (POST, PUT, PATCH, DELETE)
+  if (pathname.startsWith('/api/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    // Exempt webhooks (they are verified via cryptographic signatures)
+    if (!pathname.startsWith('/api/webhooks/')) {
+      const origin = req.headers.get('origin');
+      const host = req.headers.get('host');
+      if (origin && host) {
+        try {
+          const originHost = new URL(origin).host;
+          if (originHost !== host) {
+            return new NextResponse(
+              JSON.stringify({ error: 'CSRF validation failed: Invalid cross-origin request.' }),
+              { status: 403, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+        } catch {
+          return new NextResponse(
+            JSON.stringify({ error: 'CSRF validation failed: Malformed Origin.' }),
+            { status: 403, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+      }
+    }
+  }
 
   // Protected paths
   const isAdminPath = pathname.startsWith('/admin');
@@ -61,5 +87,6 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/resident/:path*',
+    '/api/:path*',
   ],
 };

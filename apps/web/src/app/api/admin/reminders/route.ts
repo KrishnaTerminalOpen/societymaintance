@@ -1,21 +1,39 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, DepositStatus, AuditAction, NotificationStatus } from '@colony/database';
 import { formatPaiseToINR } from '@colony/shared';
+
+const SendReminderSchema = z.object({
+  userId: z.string().min(1).max(128).optional(),
+  block: z.string().trim().max(32).optional(),
+  depositStatus: z.enum(['ALL', 'PENDING', 'PARTIAL', 'OVERDUE']).default('ALL'),
+  channel: z.enum(['ALL', 'SMS', 'EMAIL', 'WHATSAPP']).default('ALL'),
+  batchSize: z.coerce.number().int().min(1).max(100).default(10),
+  delayBetweenBatchesSeconds: z.coerce.number().int().min(0).max(60).default(3),
+});
 
 export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuth(req, ['ADMIN', 'SUPER_ADMIN']);
     const body = await req.json();
 
+    const parsed = SendReminderSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid reminder request payload', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+
     const {
       userId,
       block,
-      depositStatus = 'ALL',
-      channel = 'ALL',
-      batchSize = 10,
-      delayBetweenBatchesSeconds = 3,
-    } = body;
+      depositStatus,
+      channel,
+      batchSize,
+      delayBetweenBatchesSeconds,
+    } = parsed.data;
 
     // 1. Single Resident Reminder
     if (userId) {

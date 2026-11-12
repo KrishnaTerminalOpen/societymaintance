@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, PaymentStatus, DepositStatus, AuditAction, NotificationStatus } from '@colony/database';
 import { formatPaiseToINR } from '@colony/shared/edge';
+
+const ReviewRefundSchema = z.object({
+  action: z.enum(['APPROVE', 'REJECT']),
+  reason: z.string().trim().max(500).optional(),
+  approvedAmountPaise: z.number().int().positive().optional(),
+});
 
 export async function POST(
   req: NextRequest,
@@ -12,14 +19,15 @@ export async function POST(
     const { id: refundId } = await params;
     const body = await req.json();
 
-    const { action, reason, approvedAmountPaise } = body;
-
-    if (!action || (action !== 'APPROVE' && action !== 'REJECT')) {
+    const parsed = ReviewRefundSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: "Invalid action. Must be 'APPROVE' or 'REJECT'." },
+        { error: "Invalid refund review payload. Must include valid 'action' ('APPROVE' or 'REJECT')." },
         { status: 400 },
       );
     }
+
+    const { action, reason, approvedAmountPaise } = parsed.data;
 
     // Database transaction with double-refund and over-refund guards
     const result = await prisma.$transaction(async (tx) => {

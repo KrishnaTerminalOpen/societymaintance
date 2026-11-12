@@ -62,3 +62,4 @@ scenarios:
             orderId: 'order_art_{{ $randomNumber(1000, 9999) }}'
             paymentId: 'pay_art_{{ $randomNumber(1000, 9999) }}'
             signature: 'sig_mock_validation'
+

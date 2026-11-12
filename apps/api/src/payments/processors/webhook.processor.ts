@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PaymentsService } from '../payments.service';
-import { getCacheStore } from '@colony/shared';
+import { getCacheStore, AlertService, SentryTracker } from '@colony/shared';
 
 @Processor('payment-webhooks')
 export class WebhookProcessor extends WorkerHost {
@@ -36,6 +36,8 @@ export class WebhookProcessor extends WorkerHost {
       return { status: 'success', eventId };
     } catch (error) {
       this.logger.error(`Error processing webhook event ${eventId}:`, error);
+      await AlertService.alertWebhookError(eventId || job.id || 'unknown', event?.event || 'unknown', error);
+      SentryTracker.captureException(error, { eventId, eventType: event?.event, jobId: job.id });
       throw error;
     }
   }

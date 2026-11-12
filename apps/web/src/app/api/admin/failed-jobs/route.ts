@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, NotificationStatus, AuditAction } from '@colony/database';
+
+const RetryFailedJobSchema = z.object({
+  notificationId: z.string().min(1, 'notificationId is required').max(128),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -52,11 +57,12 @@ export async function POST(req: NextRequest) {
   try {
     const authUser = await requireAuth(req, ['ADMIN', 'SUPER_ADMIN']);
     const body = await req.json();
-    const { notificationId } = body;
+    const parsed = RetryFailedJobSchema.safeParse(body);
 
-    if (!notificationId) {
+    if (!parsed.success) {
       return NextResponse.json({ error: 'notificationId is required' }, { status: 400 });
     }
+    const { notificationId } = parsed.data;
 
     const notif = await prisma.notification.findUnique({
       where: { id: notificationId },

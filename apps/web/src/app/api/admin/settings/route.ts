@@ -1,7 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, AuditAction } from '@colony/database';
 import { cacheService, CacheKeys, invalidateSettingsCache } from '@colony/shared';
+
+const PatchSettingsSchema = z.object({
+  colonyName: z.string().trim().min(2).max(200).optional(),
+  logoUrl: z.string().url().max(500).optional().nullable().or(z.literal('')),
+  address: z.string().trim().max(500).optional().nullable(),
+  contactPhone: z.string().trim().max(20).optional().nullable(),
+  contactEmail: z.string().trim().email().optional().nullable().or(z.literal('')),
+  depositRules: z.record(z.any()).optional(),
+  lateFeeRules: z.record(z.any()).optional(),
+  enabledPaymentMethods: z.array(z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET', 'CASH', 'CHEQUE', 'BANK_TRANSFER'])).optional(),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -60,7 +72,15 @@ export async function GET(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const auth = await requireAuth(req, ['ADMIN', 'SUPER_ADMIN']);
-    const body = await req.json();
+    const rawBody = await req.json();
+    const parsed = PatchSettingsSchema.safeParse(rawBody);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid settings payload', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+    const body = parsed.data;
 
     const current = await prisma.setting.findUnique({ where: { id: 'default' } });
 

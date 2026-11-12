@@ -11,6 +11,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { Request } from 'express';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
+import { AlertService, SentryTracker } from '@colony/shared';
 
 @Controller('webhooks')
 export class WebhooksController {
@@ -44,6 +45,8 @@ export class WebhooksController {
     const isValid = this.gateway.verifyWebhookSignature(rawBody, signature);
     if (!isValid) {
       this.logger.error('Invalid Razorpay webhook signature detected!');
+      await AlertService.alertWebhookError('unverified', 'signature_mismatch', 'Invalid Razorpay webhook HMAC signature');
+      SentryTracker.captureMessage('Invalid Razorpay webhook signature detected', 'warning');
       throw new BadRequestException('Invalid webhook signature');
     }
 

@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, UserStatus, AuditAction } from '@colony/database';
+
+const UpdateResidentSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  email: z.string().trim().email().optional().nullable().or(z.literal('')),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
+  deactivate: z.boolean().optional(),
+});
 
 export async function PATCH(
   req: NextRequest,
@@ -11,7 +19,15 @@ export async function PATCH(
     const { id } = await params;
     const body = await req.json();
 
-    const { name, email, status, deactivate } = body;
+    const parsed = UpdateResidentSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid resident update payload', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+
+    const { name, email, status, deactivate } = parsed.data;
 
     const user = await prisma.user.findUnique({ where: { id } });
     if (!user) {

@@ -11,7 +11,13 @@ import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { prisma, PaymentStatus, DepositStatus, PaymentMethod, AuditAction } from '@colony/database';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
-import { formatPaiseToINR, UserRole, invalidateDashboardCaches } from '@colony/shared';
+import {
+  formatPaiseToINR,
+  UserRole,
+  invalidateDashboardCaches,
+  AlertService,
+  SentryTracker,
+} from '@colony/shared';
 
 export interface CreateOrderDto {
   depositId: string;
@@ -248,6 +254,17 @@ export class PaymentsService {
         where: { gatewayOrderId: razorpayOrderId, status: PaymentStatus.CREATED },
         data: { status: PaymentStatus.FAILED },
       });
+      await AlertService.alertPaymentFailure(
+        razorpayOrderId,
+        razorpayPaymentId,
+        'Razorpay signature verification failed (possible tampering)',
+        { clientIp, userId: auth?.id },
+      );
+      SentryTracker.captureMessage(
+        `Invalid Razorpay signature for order ${razorpayOrderId}`,
+        'error',
+        { razorpayOrderId, razorpayPaymentId, clientIp },
+      );
       throw new BadRequestException('Razorpay signature verification failed. Payment tampered or invalid.');
     }
 

@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
 import { prisma, UserRole, UserStatus, AuditAction } from '@colony/database';
+
+const CreateAdminSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  phone: z.string().trim().regex(/^(\+91)?[6-9]\d{9}$/, 'Valid Indian 10-digit mobile number required'),
+  email: z.string().trim().email().optional().nullable().or(z.literal('')),
+  role: z.enum(['ADMIN', 'SUPER_ADMIN']).default('ADMIN'),
+});
+
+const UpdateAdminSchema = z.object({
+  id: z.string().min(1),
+  role: z.enum(['RESIDENT', 'ADMIN', 'SUPER_ADMIN']).optional(),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
+});
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,11 +46,15 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const auth = await requireAuth(req, ['SUPER_ADMIN']);
-    const { name, phone, email, role = UserRole.ADMIN } = await req.json();
-
-    if (!name || !phone) {
-      return NextResponse.json({ error: 'Name and phone are required.' }, { status: 400 });
+    const body = await req.json();
+    const parsed = CreateAdminSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid administrator input.', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
     }
+    const { name, phone, email, role } = parsed.data;
 
     const formattedPhone = phone.trim().startsWith('+91')
       ? phone.trim()
@@ -92,11 +110,15 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const auth = await requireAuth(req, ['SUPER_ADMIN']);
-    const { id, role, status } = await req.json();
-
-    if (!id) {
-      return NextResponse.json({ error: 'Admin user ID required.' }, { status: 400 });
+    const body = await req.json();
+    const parsed = UpdateAdminSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid admin update payload.', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
     }
+    const { id, role, status } = parsed.data;
 
     // Prevent super admin from demoting themselves
     if (id === auth.sub && role && role !== UserRole.SUPER_ADMIN) {

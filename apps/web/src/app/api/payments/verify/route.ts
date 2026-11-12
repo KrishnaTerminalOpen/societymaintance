@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { ACCESS_COOKIE_NAME } from '@/lib/auth';
-import { cacheService } from '@colony/shared';
+import { cacheService, AppLogger, SentryTracker, AlertService } from '@colony/shared';
+
+const VerifyPaymentRequestSchema = z.object({
+  razorpayOrderId: z.string().min(1).max(128),
+  razorpayPaymentId: z.string().min(1).max(128),
+  razorpaySignature: z.string().min(1).max(512),
+  idempotencyKey: z.string().max(128).optional(),
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -33,6 +41,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = VerifyPaymentRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid payment verification payload', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+
     const apiUrl = process.env.API_URL || 'http://localhost:4000';
 
     const apiRes = await fetch(`${apiUrl}/api/v1/payments/verify`, {
@@ -43,10 +59,19 @@ export async function POST(req: NextRequest) {
         'x-forwarded-for': clientIp,
         'user-agent': req.headers.get('user-agent') || 'ColonyWeb',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(parsed.data),
     });
 
     const data = await apiRes.json();
+    if (apiRes.status >= 500) {
+      await AlertService.alertPaymentFailure(
+        parsed.data.razorpayOrderId,
+        parsed.data.razorpayPaymentId,
+        `Upstream payment verification returned HTTP ${apiRes.status}`,
+        { clientIp },
+      );
+    }
+
     return NextResponse.json(data, {
       status: apiRes.status,
       headers: {
@@ -55,7 +80,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Error in proxy /api/payments/verify:', error);
+    AppLogger.error('Error in proxy /api/payments/verify', { context: 'PaymentsProxy', error });
+    SentryTracker.captureException(error, { route: '/api/payments/verify' });
     return NextResponse.json(
       { error: 'Failed to contact payment engine. Please ensure API service is running.' },
       { status: 500 },

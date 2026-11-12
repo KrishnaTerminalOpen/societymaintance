@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { ACCESS_COOKIE_NAME } from '@/lib/auth';
-import { cacheService } from '@colony/shared';
+import { cacheService, AppLogger, SentryTracker } from '@colony/shared';
+
+const CreateOrderRequestSchema = z.object({
+  depositId: z.string().min(1, 'Deposit ID is required').max(128),
+  requestedAmountPaise: z.number().int().positive().optional(),
+  idempotencyKey: z.string().min(8).max(128),
+  method: z.enum(['UPI', 'CARD', 'NETBANKING', 'WALLET']).optional(),
+});
 
 export async function POST(req: NextRequest) {
   try {
@@ -34,6 +42,14 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
+    const parsed = CreateOrderRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid payment order request', details: parsed.error.flatten().fieldErrors },
+        { status: 400 },
+      );
+    }
+
     const apiUrl = process.env.API_URL || 'http://localhost:4000';
 
     const apiRes = await fetch(`${apiUrl}/api/v1/payments/create-order`, {
@@ -44,7 +60,7 @@ export async function POST(req: NextRequest) {
         'x-forwarded-for': clientIp,
         'user-agent': req.headers.get('user-agent') || 'ColonyWeb',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(parsed.data),
     });
 
     const data = await apiRes.json();
@@ -57,7 +73,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error('Error in proxy /api/payments/create-order:', error);
+    AppLogger.error('Error in proxy /api/payments/create-order', { context: 'PaymentsProxy', error });
+    SentryTracker.captureException(error, { route: '/api/payments/create-order' });
     return NextResponse.json(
       { error: 'Failed to contact payment engine. Please ensure API service is running.' },
       { status: 500 },

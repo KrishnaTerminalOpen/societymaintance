@@ -147,3 +147,4 @@ async function runBenchmark() {
 if (require.main === module) {
   runBenchmark().catch(console.error);
 }
+

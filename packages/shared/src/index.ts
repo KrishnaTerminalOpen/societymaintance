@@ -23,3 +23,7 @@ export * from './auth/sms/twilio.provider';
 export * from './auth/sms/console.provider';
 export * from './auth/sms/sms-provider.factory';
 export * from './cache/cache.service';
+export * from './security/encryption';
+export * from './logging/logger';
+export * from './logging/sentry';
+export * from './alerts/alert.service';
