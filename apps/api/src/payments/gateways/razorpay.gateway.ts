@@ -177,6 +177,117 @@ export class RazorpayGateway implements IPaymentGateway {
   }
 
   /**
+   * Fetches settled transactions from Razorpay for reconciliation within a date range.
+   */
+  async fetchSettledPayments(from?: Date, to?: Date): Promise<GatewayPaymentDetails[]> {
+    if (this.isMockMode || !this.razorpayClient) {
+      // In mock/dev mode, return simulated gateway transactions
+      return [
+        {
+          paymentId: 'pay_rzp_mock_live_101',
+          orderId: 'order_mock_test_1',
+          amountPaise: 4000000,
+          currency: 'INR',
+          status: 'captured',
+          method: 'upi',
+          vpa: 'resident@okhdfcbank',
+          captured: true,
+        },
+        {
+          paymentId: 'pay_rzp_mock_live_102',
+          orderId: 'order_mock_test_2',
+          amountPaise: 2500000,
+          currency: 'INR',
+          status: 'captured',
+          method: 'netbanking',
+          bank: 'HDFC',
+          captured: true,
+        },
+        {
+          paymentId: 'pay_rzp_unreconciled_999',
+          orderId: 'order_unreconciled_999',
+          amountPaise: 5000000,
+          currency: 'INR',
+          status: 'captured',
+          method: 'upi',
+          vpa: 'mismatch@okaxis',
+          captured: true,
+        },
+      ];
+    }
+
+    try {
+      const fromTimestamp = from ? Math.floor(from.getTime() / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+      const toTimestamp = to ? Math.floor(to.getTime() / 1000) : Math.floor(Date.now() / 1000);
+
+      const response: any = await this.razorpayClient.payments.all({
+        from: fromTimestamp,
+        to: toTimestamp,
+        count: 100,
+      });
+
+      const items = response.items || [];
+      return items.map((payment: any) => ({
+        paymentId: payment.id,
+        orderId: payment.order_id,
+        amountPaise: Number(payment.amount),
+        currency: payment.currency,
+        status: payment.status,
+        method: payment.method || 'upi',
+        bank: payment.bank,
+        wallet: payment.wallet,
+        vpa: payment.vpa,
+        email: payment.email,
+        contact: payment.contact,
+        errorCode: payment.error_code,
+        errorDescription: payment.error_description,
+        captured: payment.captured,
+      }));
+    } catch (error) {
+      this.logger.error('Failed to fetch settled payments from Razorpay:', error);
+      throw new Error(`Razorpay fetchSettledPayments failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Fetches settled refunds from Razorpay for reconciliation within a date range.
+   */
+  async fetchSettledRefunds(from?: Date, to?: Date): Promise<GatewayRefundResult[]> {
+    if (this.isMockMode || !this.razorpayClient) {
+      return [
+        {
+          refundId: 'rfnd_mock_settled_1',
+          paymentId: 'pay_rzp_mock_live_101',
+          amountPaise: 1000000,
+          status: 'processed',
+        },
+      ];
+    }
+
+    try {
+      const fromTimestamp = from ? Math.floor(from.getTime() / 1000) : Math.floor((Date.now() - 30 * 86400000) / 1000);
+      const toTimestamp = to ? Math.floor(to.getTime() / 1000) : Math.floor(Date.now() / 1000);
+
+      const response: any = await (this.razorpayClient as any).refunds.all({
+        from: fromTimestamp,
+        to: toTimestamp,
+        count: 100,
+      });
+
+      const items = response.items || [];
+      return items.map((refund: any) => ({
+        refundId: refund.id,
+        paymentId: refund.payment_id,
+        amountPaise: Number(refund.amount),
+        status: refund.status,
+      }));
+    } catch (error) {
+      this.logger.error('Failed to fetch settled refunds from Razorpay:', error);
+      throw new Error(`Razorpay fetchSettledRefunds failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
    * Initiates a refund for an existing payment via Razorpay Refund API.
    */
   async refund(params: GatewayRefundParams): Promise<GatewayRefundResult> {

@@ -8,6 +8,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { StorageModule } from './storage/storage.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { ReceiptsModule } from './receipts/receipts.module';
+import { ReconciliationModule } from './reconciliation/reconciliation.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { ReceiptsModule } from './receipts/receipts.module';
     NotificationsModule,
     ReceiptsModule,
     PaymentsModule,
+    ReconciliationModule,
   ],
   controllers: [AppController],
   providers: [AppService],

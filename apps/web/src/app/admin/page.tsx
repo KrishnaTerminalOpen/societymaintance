@@ -34,6 +34,11 @@ import {
   Send,
   Radio,
   Layers,
+  RefreshCcw,
+  Scale,
+  ArrowDownLeft,
+  Check,
+  AlertOctagon,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -54,6 +59,7 @@ type AdminTab =
   | 'SETTINGS'
   | 'AUDIT_LOGS'
   | 'REMINDERS_QUEUES'
+  | 'REFUNDS_RECONCILIATION'
   | 'ADMINS';
 
 export default function AdminPortalPage() {
@@ -121,6 +127,16 @@ export default function AdminPortalPage() {
   const [bulkBatchSize, setBulkBatchSize] = useState(10);
   const [bulkDelaySeconds, setBulkDelaySeconds] = useState(3);
   const [reminderFeedback, setReminderFeedback] = useState<string | null>(null);
+
+  // Refunds & Reconciliation state
+  const [refundSubTab, setRefundSubTab] = useState<'REFUND_QUEUE' | 'RECONCILIATION'>('REFUND_QUEUE');
+  const [refundStatusFilter, setRefundStatusFilter] = useState('');
+  const [reconciliationFilter, setReconciliationFilter] = useState('ALL');
+  const [reviewModalRefund, setReviewModalRefund] = useState<any>(null);
+  const [reviewAction, setReviewAction] = useState<'APPROVE' | 'REJECT'>('APPROVE');
+  const [reviewReason, setReviewReason] = useState('');
+  const [customRefundRupees, setCustomRefundRupees] = useState('');
+  const [reconciliationFeedback, setReconciliationFeedback] = useState<string | null>(null);
 
   // ============================================================================
   // Fetch Current Admin Context
@@ -259,6 +275,87 @@ export default function AdminPortalPage() {
       return res.json();
     },
     enabled: activeTab === 'REMINDERS_QUEUES',
+  });
+
+  // ============================================================================
+  // Fetch Refunds List
+  // ============================================================================
+  const { data: refundsData, isLoading: isRefundsLoading, refetch: refetchRefunds } = useQuery({
+    queryKey: ['admin-refunds-list', refundStatusFilter],
+    queryFn: async () => {
+      const url = refundStatusFilter
+        ? `/api/admin/refunds?status=${refundStatusFilter}`
+        : '/api/admin/refunds';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch refunds');
+      return res.json();
+    },
+    enabled: activeTab === 'REFUNDS_RECONCILIATION',
+  });
+
+  // ============================================================================
+  // Fetch Reconciliation Report
+  // ============================================================================
+  const { data: reconciliationData, isLoading: isReconciliationLoading, refetch: refetchReconciliation } = useQuery({
+    queryKey: ['admin-reconciliation-report'],
+    queryFn: async () => {
+      const res = await fetch('/api/admin/reconciliation');
+      if (!res.ok) throw new Error('Failed to fetch reconciliation report');
+      return res.json();
+    },
+    enabled: activeTab === 'REFUNDS_RECONCILIATION',
+  });
+
+  // ============================================================================
+  // Review Refund Mutation
+  // ============================================================================
+  const reviewRefundMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: any }) => {
+      const res = await fetch(`/api/admin/refunds/${id}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Review failed');
+      return data;
+    },
+    onSuccess: (data) => {
+      setReviewModalRefund(null);
+      setReviewReason('');
+      setCustomRefundRupees('');
+      refetchRefunds();
+      queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
+      alert(data.message || 'Refund review completed successfully');
+    },
+    onError: (err: any) => {
+      alert(`Refund review error: ${err.message}`);
+    },
+  });
+
+  // ============================================================================
+  // One-click Re-sync Mutation
+  // ============================================================================
+  const resyncPaymentMutation = useMutation({
+    mutationFn: async (gatewayPaymentId: string) => {
+      const res = await fetch('/api/admin/reconciliation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gatewayPaymentId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Re-sync failed');
+      return data;
+    },
+    onSuccess: (data) => {
+      setReconciliationFeedback(data.message);
+      refetchReconciliation();
+      queryClient.invalidateQueries({ queryKey: ['admin-payments-list'] });
+      setTimeout(() => setReconciliationFeedback(null), 8000);
+    },
+    onError: (err: any) => {
+      alert(`Re-sync failed: ${err.message}`);
+    },
   });
 
   // ============================================================================
@@ -562,6 +659,18 @@ export default function AdminPortalPage() {
           >
             <Bell className="h-4 w-4" />
             <span>Reminders &amp; Workers</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('REFUNDS_RECONCILIATION')}
+            className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
+              activeTab === 'REFUNDS_RECONCILIATION'
+                ? 'bg-rose-600 text-white'
+                : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+            }`}
+          >
+            <Scale className="h-4 w-4" />
+            <span>Refunds &amp; Reconciliation</span>
           </button>
 
           <button
@@ -1830,6 +1939,374 @@ export default function AdminPortalPage() {
               </div>
             </div>
           )}
+
+          {/* ====================================================================
+              9. TAB: REFUNDS & RECONCILIATION
+          ==================================================================== */}
+          {activeTab === 'REFUNDS_RECONCILIATION' && (
+            <div className="space-y-6">
+              {/* Header with Sub-tabs and Export Button */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-xl font-extrabold text-slate-900">Refunds &amp; Gateway Reconciliation</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Review resident refund claims, trigger gateway refunds, and reconcile Razorpay settlements
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <a
+                    href="/api/admin/reconciliation/export"
+                    download
+                    className="h-9 px-3 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    <span>Export Recon CSV</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Sub-navigation pills */}
+              <div className="flex items-center space-x-2 border-b border-slate-200 pb-3">
+                <button
+                  onClick={() => setRefundSubTab('REFUND_QUEUE')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center space-x-2 ${
+                    refundSubTab === 'REFUND_QUEUE'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <ArrowDownLeft className="h-4 w-4" />
+                  <span>Refund Requests</span>
+                  {refundsData?.data && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-rose-700 text-white font-extrabold">
+                      {refundsData.data.filter((r: any) => r.status === 'PENDING').length}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => setRefundSubTab('RECONCILIATION')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-colors flex items-center space-x-2 ${
+                    refundSubTab === 'RECONCILIATION'
+                      ? 'bg-rose-600 text-white shadow-sm'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <RefreshCcw className="h-4 w-4" />
+                  <span>Gateway Reconciliation</span>
+                  {reconciliationData?.report?.metrics?.discrepancyCount > 0 && (
+                    <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-extrabold animate-pulse">
+                      {reconciliationData.report.metrics.discrepancyCount}
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Status Alert / Feedback */}
+              {reconciliationFeedback && (
+                <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center space-x-3 text-emerald-800 text-xs font-semibold">
+                  <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+                  <span>{reconciliationFeedback}</span>
+                </div>
+              )}
+
+              {/* ================================================================
+                  SUB-VIEW 1: REFUND REQUESTS QUEUE
+              ================================================================ */}
+              {refundSubTab === 'REFUND_QUEUE' && (
+                <div className="space-y-4">
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-700">Filter Status:</span>
+                      <select
+                        value={refundStatusFilter}
+                        onChange={(e) => setRefundStatusFilter(e.target.value)}
+                        className="h-9 px-3 rounded-lg border border-slate-300 text-xs font-semibold focus:outline-none focus:border-rose-600 bg-white"
+                      >
+                        <option value="">All Requests</option>
+                        <option value="PENDING">Pending Review</option>
+                        <option value="PROCESSED">Approved &amp; Refunded</option>
+                        <option value="FAILED">Rejected</option>
+                      </select>
+                    </div>
+
+                    <button
+                      onClick={() => refetchRefunds()}
+                      className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 flex items-center space-x-1"
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                      <span>Refresh Queue</span>
+                    </button>
+                  </div>
+
+                  {/* Refunds Ledger Table */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                    {isRefundsLoading ? (
+                      <div className="p-8 text-center text-xs text-slate-400">Loading refund claims...</div>
+                    ) : !refundsData?.data || refundsData.data.length === 0 ? (
+                      <div className="p-8 text-center space-y-2">
+                        <CheckCircle2 className="h-10 w-10 text-emerald-500 mx-auto" />
+                        <div className="text-sm font-bold text-slate-900">No Refund Requests Pending</div>
+                        <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                          There are currently no active deposit refund requests requiring committee review.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                            <tr>
+                              <th className="py-3 px-4">Resident &amp; Property</th>
+                              <th className="py-3 px-4">Paid Total</th>
+                              <th className="py-3 px-4">Claimed Refund</th>
+                              <th className="py-3 px-4">Resident Reason</th>
+                              <th className="py-3 px-4">Status</th>
+                              <th className="py-3 px-4">Date</th>
+                              <th className="py-3 px-4 text-right">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                            {refundsData.data.map((r: any) => (
+                              <tr key={r.id} className="hover:bg-slate-50/50">
+                                <td className="py-3 px-4">
+                                  <div className="font-bold text-slate-900">{r.resident.name}</div>
+                                  <div className="text-[11px] text-slate-500">{r.unit} • {r.resident.phone}</div>
+                                </td>
+                                <td className="py-3 px-4 font-bold text-slate-900">
+                                  {formatPaiseToINR(r.payment.amountPaise)}
+                                </td>
+                                <td className="py-3 px-4 font-extrabold text-rose-600">
+                                  {formatPaiseToINR(r.amountPaise)}
+                                </td>
+                                <td className="py-3 px-4 max-w-xs truncate text-[11px] text-slate-600" title={r.reason}>
+                                  {r.reason}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      r.status === 'PROCESSED'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : r.status === 'PENDING'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : 'bg-rose-100 text-rose-800'
+                                    }`}
+                                  >
+                                    {r.status}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-slate-500 text-[11px]">
+                                  {new Date(r.createdAt).toLocaleDateString('en-IN', {
+                                    day: '2-digit',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })}
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  {r.status === 'PENDING' ? (
+                                    <div className="flex items-center justify-end space-x-1.5">
+                                      <button
+                                        onClick={() => {
+                                          setReviewModalRefund(r);
+                                          setReviewAction('APPROVE');
+                                          setCustomRefundRupees((Number(r.amountPaise) / 100).toString());
+                                        }}
+                                        className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] shadow-sm transition-colors"
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          setReviewModalRefund(r);
+                                          setReviewAction('REJECT');
+                                          setReviewReason('');
+                                        }}
+                                        className="h-8 px-2.5 rounded-lg border border-rose-300 text-rose-700 hover:bg-rose-50 font-bold text-[11px] transition-colors"
+                                      >
+                                        Reject
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-mono">
+                                      {r.gatewayRefundId || 'Settled'}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ================================================================
+                  SUB-VIEW 2: GATEWAY RECONCILIATION
+              ================================================================ */}
+              {refundSubTab === 'RECONCILIATION' && (
+                <div className="space-y-6">
+                  {/* Summary Metric Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Evaluated</span>
+                      <div className="text-2xl font-black text-slate-900">
+                        {reconciliationData?.report?.metrics?.totalTransactions || 0}
+                      </div>
+                      <p className="text-[11px] text-slate-500">Cross-verified against Razorpay API</p>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Matched &amp; Balanced</span>
+                      <div className="text-2xl font-black text-emerald-600">
+                        {reconciliationData?.report?.metrics?.matchedCount || 0}
+                      </div>
+                      <p className="text-[11px] text-emerald-700 font-semibold">
+                        {(
+                          ((reconciliationData?.report?.metrics?.matchedCount || 0) /
+                            Math.max(1, reconciliationData?.report?.metrics?.totalTransactions || 1)) *
+                          100
+                        ).toFixed(1)}
+                        % 1:1 ledger parity
+                      </p>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Flagged Discrepancies</span>
+                      <div className={`text-2xl font-black ${
+                        (reconciliationData?.report?.metrics?.discrepancyCount || 0) > 0 ? 'text-amber-600' : 'text-slate-900'
+                      }`}>
+                        {reconciliationData?.report?.metrics?.discrepancyCount || 0}
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        {reconciliationData?.report?.metrics?.missingInDbCount || 0} missing • {reconciliationData?.report?.metrics?.statusMismatchCount || 0} status drift
+                      </p>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm space-y-1">
+                      <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Automated Daily Poller</span>
+                      <div className="text-sm font-bold text-slate-900 mt-1">Midnight Cron Job</div>
+                      <p className="text-[11px] text-slate-500">
+                        Nightly reconciliation sweeps detect and flag stranded payments automatically.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Filter and Actions Bar */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-700">Display:</span>
+                      <div className="flex items-center space-x-1">
+                        {['ALL', 'DISCREPANCIES', 'MATCHED'].map((filter) => (
+                          <button
+                            key={filter}
+                            onClick={() => setReconciliationFilter(filter)}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                              reconciliationFilter === filter
+                                ? 'bg-slate-900 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            {filter}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => refetchReconciliation()}
+                      className="h-9 px-3 rounded-lg border border-slate-200 hover:bg-slate-50 text-xs font-semibold text-slate-600 flex items-center space-x-1"
+                    >
+                      <RotateCw className="h-3.5 w-3.5" />
+                      <span>Re-Run Comparison</span>
+                    </button>
+                  </div>
+
+                  {/* Reconciliation Table */}
+                  <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
+                          <tr>
+                            <th className="py-3 px-4">Gateway Reference</th>
+                            <th className="py-3 px-4">Resident &amp; Unit</th>
+                            <th className="py-3 px-4">Gateway Amount</th>
+                            <th className="py-3 px-4">DB Amount</th>
+                            <th className="py-3 px-4">Status (GW / DB)</th>
+                            <th className="py-3 px-4">Discrepancy Flag</th>
+                            <th className="py-3 px-4 text-right">One-Click Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                          {reconciliationData?.report?.items
+                            ?.filter((item: any) => {
+                              if (reconciliationFilter === 'DISCREPANCIES') return item.discrepancyType !== 'MATCHED';
+                              if (reconciliationFilter === 'MATCHED') return item.discrepancyType === 'MATCHED';
+                              return true;
+                            })
+                            .map((item: any) => (
+                              <tr key={item.gatewayPaymentId} className="hover:bg-slate-50/50">
+                                <td className="py-3 px-4">
+                                  <div className="font-mono font-bold text-slate-900">{item.gatewayPaymentId}</div>
+                                  <div className="text-[10px] text-slate-500 font-mono">{item.gatewayOrderId || 'N/A'}</div>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="font-bold text-slate-900">{item.residentName || 'Unassigned'}</div>
+                                  <div className="text-[11px] text-slate-500">{item.unit || 'Colony Unit'}</div>
+                                </td>
+                                <td className="py-3 px-4 font-bold text-slate-900">
+                                  {formatPaiseToINR(item.gatewayAmountPaise)}
+                                </td>
+                                <td className="py-3 px-4 font-semibold text-slate-700">
+                                  {item.dbAmountPaise ? formatPaiseToINR(item.dbAmountPaise) : '₹0'}
+                                </td>
+                                <td className="py-3 px-4 text-[11px]">
+                                  <span className="font-semibold text-emerald-700">{item.gatewayStatus}</span>
+                                  <span className="text-slate-400"> / </span>
+                                  <span className="font-semibold text-slate-700">{item.dbStatus || 'MISSING'}</span>
+                                </td>
+                                <td className="py-3 px-4">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      item.discrepancyType === 'MATCHED'
+                                        ? 'bg-emerald-100 text-emerald-800'
+                                        : item.discrepancyType === 'STATUS_MISMATCH'
+                                        ? 'bg-amber-100 text-amber-800'
+                                        : item.discrepancyType === 'MISSING_IN_DB'
+                                        ? 'bg-rose-100 text-rose-800'
+                                        : 'bg-purple-100 text-purple-800'
+                                    }`}
+                                  >
+                                    {item.discrepancyType}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  {item.discrepancyType !== 'MATCHED' ? (
+                                    <button
+                                      onClick={() => resyncPaymentMutation.mutate(item.gatewayPaymentId)}
+                                      disabled={resyncPaymentMutation.isPending}
+                                      className="h-8 px-3 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs shadow-sm transition-colors flex items-center space-x-1 ml-auto disabled:opacity-50"
+                                    >
+                                      <RotateCw className="h-3 w-3" />
+                                      <span>Re-Sync</span>
+                                    </button>
+                                  ) : (
+                                    <span className="inline-flex items-center text-emerald-600 font-bold text-[11px] space-x-1">
+                                      <Check className="h-3.5 w-3.5" />
+                                      <span>Balanced</span>
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
 
@@ -2022,6 +2499,113 @@ export default function AdminPortalPage() {
       )}
 
       {/* ========================================================================
+          REVIEW REFUND MODAL
+      ======================================================================== */}
+      {reviewModalRefund && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h3 className="font-bold text-base text-slate-900">
+                {reviewAction === 'APPROVE' ? 'Approve Security Deposit Refund' : 'Reject Refund Request'}
+              </h3>
+              <button onClick={() => setReviewModalRefund(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 text-xs">
+              <div className="p-3 bg-slate-50 rounded-xl space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Resident:</span>
+                  <span className="font-bold text-slate-900">{reviewModalRefund.resident?.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Unit:</span>
+                  <span className="font-bold text-slate-900">{reviewModalRefund.unit}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Original Payment:</span>
+                  <span className="font-bold text-slate-900">{formatPaiseToINR(reviewModalRefund.payment?.amountPaise)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500 font-medium">Claimed Reason:</span>
+                  <span className="font-semibold text-slate-700 italic">{reviewModalRefund.reason}</span>
+                </div>
+              </div>
+
+              {reviewAction === 'APPROVE' ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Refund Amount to Disburse (₹)
+                    </label>
+                    <input
+                      type="number"
+                      value={customRefundRupees}
+                      onChange={(e) => setCustomRefundRupees(e.target.value)}
+                      className="w-full h-10 px-3 rounded-xl border border-slate-300 font-bold text-sm text-slate-900 focus:outline-none focus:border-rose-600"
+                    />
+                    <p className="text-[11px] text-slate-500 mt-1">
+                      Full or partial refund amount. Cannot exceed original paid balance.
+                    </p>
+                  </div>
+
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-[11px] text-rose-800 space-y-1">
+                    <p className="font-bold">⚠️ Real-Time Gateway Disbursal</p>
+                    <p>
+                      Approving this request will immediately invoke the Razorpay Refund API and return funds to the resident&apos;s source account.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Rejection Reason (Sent to Resident)
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={reviewReason}
+                    onChange={(e) => setReviewReason(e.target.value)}
+                    placeholder="e.g. Unsettled utility dues or damage deductions require resolution"
+                    className="w-full p-3 rounded-xl border border-slate-300 text-xs focus:outline-none focus:border-rose-600"
+                  />
+                </div>
+              )}
+
+              <button
+                onClick={() => {
+                  const numRupees = parseFloat(customRefundRupees);
+                  reviewRefundMutation.mutate({
+                    id: reviewModalRefund.id,
+                    payload: {
+                      action: reviewAction,
+                      reason: reviewReason || undefined,
+                      approvedAmountPaise:
+                        reviewAction === 'APPROVE' && !isNaN(numRupees)
+                          ? Math.round(numRupees * 100)
+                          : undefined,
+                    },
+                  });
+                }}
+                disabled={reviewRefundMutation.isPending}
+                className={`w-full h-11 rounded-xl text-white font-bold text-xs shadow-md transition-colors disabled:opacity-50 ${
+                  reviewAction === 'APPROVE'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {reviewRefundMutation.isPending
+                  ? 'Processing Transaction...'
+                  : reviewAction === 'APPROVE'
+                  ? 'Confirm Gateway Refund'
+                  : 'Confirm Rejection'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================
           MOBILE BOTTOM NAVIGATION (Admin Controls)
       ======================================================================== */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 h-16 flex items-center justify-around px-2 z-30 shadow-lg text-slate-400">
@@ -2073,6 +2657,16 @@ export default function AdminPortalPage() {
         >
           <Bell className="h-5 w-5" />
           <span className="text-[10px]">Reminders</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('REFUNDS_RECONCILIATION')}
+          className={`flex-1 h-full flex flex-col items-center justify-center space-y-1 ${
+            activeTab === 'REFUNDS_RECONCILIATION' ? 'text-rose-400 font-bold' : ''
+          }`}
+        >
+          <Scale className="h-5 w-5" />
+          <span className="text-[10px]">Recon</span>
         </button>
 
         <button

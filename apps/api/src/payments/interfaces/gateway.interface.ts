@@ -53,7 +53,9 @@ export interface IPaymentGateway {
   createOrder(params: CreateGatewayOrderParams): Promise<GatewayOrderResult>;
   verifyPayment(params: VerifyPaymentParams): boolean;
   fetchPayment(paymentId: string): Promise<GatewayPaymentDetails>;
+  fetchSettledPayments(from?: Date, to?: Date): Promise<GatewayPaymentDetails[]>;
   refund(params: GatewayRefundParams): Promise<GatewayRefundResult>;
+  fetchSettledRefunds(from?: Date, to?: Date): Promise<GatewayRefundResult[]>;
   verifyWebhookSignature(rawBody: string, signature: string, secret: string): boolean;
 }
 

@@ -27,6 +27,13 @@ export interface VerifyPaymentDto {
   idempotencyKey?: string;
 }
 
+export interface ReviewRefundDto {
+  refundId: string;
+  action: 'APPROVE' | 'REJECT';
+  reason?: string;
+  approvedAmountPaise?: number;
+}
+
 export interface AuthContext {
   id: string;
   phone: string;
@@ -665,5 +672,247 @@ export class PaymentsService {
     }
 
     return resolvedCount;
+  }
+
+  /**
+   * 6. POST /payments/refunds/review
+   * - Reviews resident refund request with concurrency & double-refund protection
+   * - Verifies cumulative refunded amount does not exceed payment amount
+   * - Triggers gateway API refund
+   * - Atomically updates refund, payment, and deposit balances
+   * - Enqueues resident notification & writes audit log
+   */
+  async reviewRefundRequest(
+    dto: ReviewRefundDto,
+    auth: AuthContext,
+    clientIp = '127.0.0.1',
+    userAgent = 'Unknown',
+  ) {
+    const { refundId, action, reason, approvedAmountPaise } = dto;
+
+    return await prisma.$transaction(async (tx) => {
+      // 1. Fetch Refund with related Payment, Deposit, and User
+      const refund = await tx.refund.findUnique({
+        where: { id: refundId },
+        include: {
+          payment: {
+            include: {
+              deposit: {
+                include: { house: true },
+              },
+              user: true,
+            },
+          },
+        },
+      });
+
+      if (!refund) {
+        throw new NotFoundException(`Refund request ${refundId} not found.`);
+      }
+
+      if (refund.status !== 'PENDING') {
+        throw new BadRequestException(
+          `Refund request ${refundId} has already been reviewed (current status: ${refund.status}).`,
+        );
+      }
+
+      const payment = refund.payment;
+      if (
+        payment.status !== PaymentStatus.SUCCESS &&
+        payment.status !== PaymentStatus.PARTIALLY_REFUNDED
+      ) {
+        throw new BadRequestException(
+          `Underlying payment ${payment.id} is not eligible for refunds (status: ${payment.status}).`,
+        );
+      }
+
+      // Rejection branch
+      if (action === 'REJECT') {
+        const rejectionNote = reason || 'Refund request rejected by society committee';
+        const updatedRefund = await tx.refund.update({
+          where: { id: refund.id },
+          data: {
+            status: 'FAILED',
+            reason: `${refund.reason} [Rejected: ${rejectionNote}]`,
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorId: auth.id,
+            actorPhone: auth.phone,
+            action: AuditAction.UPDATE,
+            entity: 'Refund',
+            entityId: refund.id,
+            before: { status: 'PENDING', amount: refund.amount.toString() },
+            after: { status: 'FAILED', rejectionReason: rejectionNote },
+            ipAddress: clientIp,
+            userAgent,
+          },
+        });
+
+        // Notify resident of rejection
+        if (this.notificationsQueue) {
+          try {
+            await this.notificationsQueue.add(
+              'dispatch-notification',
+              {
+                userId: payment.userId,
+                type: 'SYSTEM_ALERT',
+                channel: 'ALL',
+                metadata: {
+                  title: 'Refund Request Update',
+                  message: `Your deposit refund request of ${formatPaiseToINR(refund.amount)} for Unit ${payment.deposit.house?.block || ''}-${payment.deposit.house?.houseNumber || ''} was not approved. Note: ${rejectionNote}`,
+                },
+              },
+              { attempts: 5, backoff: { type: 'exponential', delay: 2000 } },
+            );
+          } catch (err: any) {
+            this.logger.error(`Notification dispatch error: ${err.message}`);
+          }
+        }
+
+        return {
+          success: true,
+          status: 'REJECTED',
+          refundId: updatedRefund.id,
+          message: 'Refund request was rejected successfully.',
+        };
+      }
+
+      // Approval branch: compute amount and check cumulative limits
+      const refundAmountPaise = approvedAmountPaise
+        ? BigInt(approvedAmountPaise)
+        : refund.amount;
+
+      if (refundAmountPaise <= 0n) {
+        throw new BadRequestException('Refund amount must be greater than zero.');
+      }
+
+      // Fetch all previously settled refunds for this payment
+      const settledRefunds = await tx.refund.findMany({
+        where: {
+          paymentId: payment.id,
+          status: 'PROCESSED',
+          id: { not: refund.id },
+        },
+      });
+
+      const alreadyRefundedPaise = settledRefunds.reduce((sum, r) => sum + r.amount, 0n);
+
+      if (alreadyRefundedPaise + refundAmountPaise > payment.amount) {
+        throw new BadRequestException(
+          `Cannot refund ${formatPaiseToINR(refundAmountPaise)}. Cumulative refunds (${formatPaiseToINR(alreadyRefundedPaise + refundAmountPaise)}) would exceed original paid amount ${formatPaiseToINR(payment.amount)}.`,
+        );
+      }
+
+      // 2. Gateway Refund API Call
+      const gatewayRefund = await this.gateway.refund({
+        paymentId: payment.gatewayPaymentId || payment.id,
+        amountPaise: refundAmountPaise,
+        notes: {
+          refundId: refund.id,
+          paymentId: payment.id,
+          depositId: payment.depositId,
+          approvedBy: auth.name,
+        },
+      });
+
+      // 3. Update Refund record
+      const updatedRefund = await tx.refund.update({
+        where: { id: refund.id },
+        data: {
+          status: 'PROCESSED',
+          amount: refundAmountPaise,
+          gatewayRefundId: gatewayRefund.refundId,
+        },
+      });
+
+      // 4. Update Payment status
+      const isFullRefund = alreadyRefundedPaise + refundAmountPaise >= payment.amount;
+      const newPaymentStatus = isFullRefund
+        ? PaymentStatus.REFUNDED
+        : PaymentStatus.PARTIALLY_REFUNDED;
+
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: newPaymentStatus },
+      });
+
+      // 5. Update Deposit balance
+      const currentPaid = payment.deposit.amountPaid;
+      const newDepositPaid = currentPaid > refundAmountPaise ? currentPaid - refundAmountPaise : 0n;
+      const newDepositStatus =
+        newDepositPaid === 0n
+          ? DepositStatus.PENDING
+          : newDepositPaid < payment.deposit.amountDue
+          ? DepositStatus.PARTIAL
+          : DepositStatus.PAID;
+
+      await tx.deposit.update({
+        where: { id: payment.depositId },
+        data: {
+          amountPaid: newDepositPaid,
+          status: newDepositStatus,
+        },
+      });
+
+      // 6. Audit Log
+      await tx.auditLog.create({
+        data: {
+          actorId: auth.id,
+          actorPhone: auth.phone,
+          action: AuditAction.REFUND_COMPLETED,
+          entity: 'Refund',
+          entityId: refund.id,
+          before: {
+            paymentStatus: payment.status,
+            depositAmountPaid: currentPaid.toString(),
+            refundStatus: 'PENDING',
+          },
+          after: {
+            paymentStatus: newPaymentStatus,
+            depositAmountPaid: newDepositPaid.toString(),
+            refundStatus: 'PROCESSED',
+            refundAmountPaise: refundAmountPaise.toString(),
+            gatewayRefundId: gatewayRefund.refundId,
+          },
+          ipAddress: clientIp,
+          userAgent,
+        },
+      });
+
+      // 7. Enqueue REFUND_PROCESSED notification to resident
+      if (this.notificationsQueue) {
+        try {
+          await this.notificationsQueue.add(
+            'dispatch-notification',
+            {
+              userId: payment.userId,
+              type: 'REFUND_PROCESSED',
+              channel: 'ALL',
+              metadata: {
+                amountPaise: Number(refundAmountPaise),
+                gatewayRefundId: gatewayRefund.refundId,
+                unit: `Block ${payment.deposit.house?.block || ''}-${payment.deposit.house?.houseNumber || ''}`,
+              },
+            },
+            { attempts: 5, backoff: { type: 'exponential', delay: 2000 } },
+          );
+        } catch (notifErr: any) {
+          this.logger.error(`Failed to enqueue refund notification: ${notifErr.message}`);
+        }
+      }
+
+      return {
+        success: true,
+        status: 'PROCESSED',
+        refundId: updatedRefund.id,
+        gatewayRefundId: gatewayRefund.refundId,
+        refundedAmountPaise: Number(refundAmountPaise),
+        paymentStatus: newPaymentStatus,
+        newDepositPaidPaise: Number(newDepositPaid),
+      };
+    });
   }
 }

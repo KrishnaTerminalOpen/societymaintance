@@ -7,7 +7,7 @@ import {
   Ip,
   Headers,
 } from '@nestjs/common';
-import { PaymentsService, CreateOrderDto, VerifyPaymentDto } from './payments.service';
+import { PaymentsService, CreateOrderDto, VerifyPaymentDto, ReviewRefundDto } from './payments.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -67,6 +67,29 @@ export class PaymentsController {
   async triggerStuckPoller() {
     const resolved = await this.paymentsService.pollStuckPayments();
     return { success: true, resolvedPaymentsCount: resolved };
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'SUPER_ADMIN')
+  @Post('refunds/review')
+  async reviewRefund(
+    @Body() dto: ReviewRefundDto,
+    @Req() req: Request,
+    @Ip() clientIp: string,
+    @Headers('user-agent') userAgent: string,
+  ) {
+    const user = (req as any).user;
+    return this.paymentsService.reviewRefundRequest(
+      dto,
+      {
+        id: user.sub,
+        phone: user.phone,
+        role: user.role,
+        name: user.name,
+      },
+      clientIp,
+      userAgent,
+    );
   }
 }
 
