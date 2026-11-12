@@ -1,0 +1,61 @@
+export const USER_ROLES = ['RESIDENT', 'ADMIN', 'SUPER_ADMIN'] as const;
+export const USER_STATUSES = ['ACTIVE', 'INACTIVE', 'PENDING_VERIFICATION', 'SUSPENDED'] as const;
+
+export const HOUSE_TYPES = [
+  'FLAT_1BHK',
+  'FLAT_2BHK',
+  'FLAT_3BHK',
+  'FLAT_4BHK',
+  'VILLA',
+  'PENTHOUSE',
+  'PLOT',
+] as const;
+
+export const DEPOSIT_STATUSES = ['PENDING', 'PARTIAL', 'PAID', 'OVERDUE', 'REFUNDED'] as const;
+
+export const PAYMENT_STATUSES = [
+  'CREATED',
+  'PENDING',
+  'SUCCESS',
+  'FAILED',
+  'REFUNDED',
+  'PARTIALLY_REFUNDED',
+] as const;
+
+export const PAYMENT_METHODS = [
+  'UPI',
+  'NET_BANKING',
+  'DEBIT_CARD',
+  'CREDIT_CARD',
+  'CASH',
+  'CHEQUE',
+  'BANK_TRANSFER',
+] as const;
+
+export const REFUND_STATUSES = ['PENDING', 'PROCESSED', 'FAILED'] as const;
+
+export const NOTIFICATION_TYPES = [
+  'PAYMENT_DUE',
+  'PAYMENT_SUCCESS',
+  'PAYMENT_OVERDUE',
+  'REFUND_PROCESSED',
+  'SYSTEM_ALERT',
+  'RECEIPT_GENERATED',
+] as const;
+
+export const NOTIFICATION_CHANNELS = ['SMS', 'WHATSAPP', 'EMAIL', 'IN_APP'] as const;
+export const NOTIFICATION_STATUSES = ['PENDING', 'SENT', 'DELIVERED', 'FAILED'] as const;
+
+export const AUDIT_ACTIONS = [
+  'CREATE',
+  'UPDATE',
+  'DELETE',
+  'LOGIN',
+  'PAYMENT_INITIATED',
+  'PAYMENT_VERIFIED',
+  'OFFLINE_PAYMENT_RECORDED',
+  'REFUND_REQUESTED',
+  'REFUND_COMPLETED',
+  'SETTINGS_UPDATED',
+] as const;
+

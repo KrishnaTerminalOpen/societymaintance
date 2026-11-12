@@ -1,0 +1,31 @@
+{
+  "name": "colonydeposit-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ColonyDeposit - Residential Security Deposit Management Platform for India",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:web": "npm run dev --workspace=@colony/web",
+    "dev:api": "npm run dev --workspace=@colony/api",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,prisma}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,prisma}\"",
+    "db:generate": "npm run db:generate --workspace=@colony/database",
+    "db:migrate": "npm run db:migrate --workspace=@colony/database",
+    "db:migrate:deploy": "npm run db:migrate:deploy --workspace=@colony/database",
+    "db:seed": "npm run db:seed --workspace=@colony/database",
+    "db:studio": "npm run db:studio --workspace=@colony/database"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "npm@11.19.0"
+}
+

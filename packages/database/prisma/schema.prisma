@@ -1,0 +1,333 @@
+// ==============================================================================
+// ColonyDeposit - Prisma Database Schema
+// Database: PostgreSQL with Connection Pooling (PgBouncer compatible)
+// All monetary values are strictly represented as integers in paise (BigInt).
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ------------------------------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------------------------------
+
+enum UserRole {
+  RESIDENT
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  PENDING_VERIFICATION
+  SUSPENDED
+}
+
+enum HouseType {
+  FLAT_1BHK
+  FLAT_2BHK
+  FLAT_3BHK
+  FLAT_4BHK
+  VILLA
+  PENTHOUSE
+  PLOT
+}
+
+enum DepositStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+  REFUNDED
+}
+
+enum PaymentStatus {
+  CREATED
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  UPI
+  NET_BANKING
+  DEBIT_CARD
+  CREDIT_CARD
+  CASH
+  CHEQUE
+  BANK_TRANSFER
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+enum NotificationType {
+  PAYMENT_DUE
+  PAYMENT_SUCCESS
+  PAYMENT_OVERDUE
+  REFUND_PROCESSED
+  SYSTEM_ALERT
+  RECEIPT_GENERATED
+}
+
+enum NotificationChannel {
+  SMS
+  WHATSAPP
+  EMAIL
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  PAYMENT_INITIATED
+  PAYMENT_VERIFIED
+  OFFLINE_PAYMENT_RECORDED
+  REFUND_REQUESTED
+  REFUND_COMPLETED
+  SETTINGS_UPDATED
+}
+
+// ------------------------------------------------------------------------------
+// MODELS
+// ------------------------------------------------------------------------------
+
+/// Represents colony users: residents, committee admins, and super admins.
+model User {
+  id        String     @id @default(cuid())
+  phone     String     @unique @db.VarChar(20)
+  name      String     @db.VarChar(100)
+  email     String?    @unique @db.VarChar(255)
+  role      UserRole   @default(RESIDENT)
+  status    UserStatus @default(ACTIVE)
+
+  // Soft delete timestamp
+  deletedAt DateTime?  @map("deleted_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Relationships
+  houses        House[]
+  payments      Payment[]
+  notifications Notification[]
+  auditLogs     AuditLog[]     @relation("UserAuditLogs")
+
+  @@index([role])
+  @@index([status])
+  @@index([deletedAt])
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// Residential unit / flat / villa within the colony.
+model House {
+  id          String    @id @default(cuid())
+  block       String    @db.VarChar(20) // e.g., "A", "Tower-1", "Phase-2"
+  houseNumber String    @map("house_number") @db.VarChar(30) // e.g., "101", "Villa-4"
+  type        HouseType @default(FLAT_2BHK)
+  ownerId     String?   @map("owner_id")
+
+  // Soft delete timestamp
+  deletedAt   DateTime? @map("deleted_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relationships
+  owner    User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  deposits Deposit[]
+
+  // A house is uniquely identified by its block and house number in the colony
+  @@unique([block, houseNumber])
+  @@index([ownerId], name: "idx_houses_owner_id")
+  @@index([block])
+  @@index([deletedAt])
+  @@index([createdAt])
+  @@map("houses")
+}
+
+/// Deposit obligations billed to a specific residential unit.
+/// Financial amounts stored strictly as integer paise.
+model Deposit {
+  id         String        @id @default(cuid())
+  houseId    String        @map("house_id")
+  title      String        @default("Security Deposit") @db.VarChar(150)
+  amountDue  BigInt        @map("amount_due") // in paise
+  amountPaid BigInt        @default(0) @map("amount_paid") // in paise
+  status     DepositStatus @default(PENDING)
+  dueDate    DateTime      @map("due_date")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+
+  // Relationships
+  house    House     @relation(fields: [houseId], references: [id], onDelete: Restrict)
+  payments Payment[]
+
+  @@index([houseId], name: "idx_deposits_house_id")
+  @@index([status], name: "idx_deposits_status")
+  @@index([dueDate])
+  @@index([createdAt], name: "idx_deposits_created_at")
+  @@map("deposits")
+}
+
+/// Individual payment transactions made towards a deposit.
+/// Financial amounts stored strictly as integer paise.
+model Payment {
+  id                 String        @id @default(cuid())
+  depositId          String        @map("deposit_id")
+  userId             String        @map("user_id")
+  amount             BigInt // in paise
+  method             PaymentMethod
+  gatewayOrderId     String?       @map("gateway_order_id") @db.VarChar(100) // Razorpay order id
+  gatewayPaymentId   String?       @map("gateway_payment_id") @db.VarChar(100) // Razorpay payment id
+  gatewaySignature   String?       @map("gateway_signature") @db.VarChar(255)
+  status             PaymentStatus @default(CREATED)
+  idempotencyKey     String        @unique @map("idempotency_key") @db.VarChar(128)
+  isOffline          Boolean       @default(false) @map("is_offline")
+  offlineNotes       String?       @map("offline_notes") @db.Text
+  offlineVerifiedBy  String?       @map("offline_verified_by") @db.VarChar(100)
+  offlineVerifiedAt  DateTime?     @map("offline_verified_at")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  // Relationships
+  deposit Deposit  @relation(fields: [depositId], references: [id], onDelete: Restrict)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  refunds Refund[]
+  receipt Receipt?
+
+  @@index([depositId])
+  @@index([userId], name: "idx_payments_user_id")
+  @@index([status], name: "idx_payments_status")
+  @@index([gatewayOrderId], name: "idx_payments_gateway_order_id")
+  @@index([gatewayPaymentId])
+  @@index([createdAt], name: "idx_payments_created_at")
+  @@map("payments")
+}
+
+/// Refunds issued against a successful payment transaction.
+/// Financial amounts stored strictly as integer paise.
+model Refund {
+  id              String       @id @default(cuid())
+  paymentId       String       @map("payment_id")
+  amount          BigInt // in paise
+  reason          String       @db.VarChar(255)
+  status          RefundStatus @default(PENDING)
+  gatewayRefundId String?      @map("gateway_refund_id") @db.VarChar(100) // Razorpay refund id
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  // Relationships
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([paymentId])
+  @@index([status], name: "idx_refunds_status")
+  @@index([gatewayRefundId])
+  @@index([createdAt], name: "idx_refunds_created_at")
+  @@map("refunds")
+}
+
+/// Official printable payment receipt generated for verified payments.
+model Receipt {
+  id            String   @id @default(cuid())
+  paymentId     String   @unique @map("payment_id")
+  receiptNumber String   @unique @map("receipt_number") @db.VarChar(60) // e.g. REC-2026-0001
+  pdfUrl        String   @map("pdf_url") @db.VarChar(500)
+  generatedAt   DateTime @default(now()) @map("generated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@index([receiptNumber])
+  @@index([createdAt], name: "idx_receipts_created_at")
+  @@map("receipts")
+}
+
+/// Notifications dispatched to users across SMS, WhatsApp, Email, and In-App.
+model Notification {
+  id        String              @id @default(cuid())
+  userId    String              @map("user_id")
+  title     String              @db.VarChar(200)
+  message   String              @db.Text
+  type      NotificationType    @default(PAYMENT_DUE)
+  channel   NotificationChannel @default(SMS)
+  status    NotificationStatus  @default(PENDING)
+  readAt    DateTime?           @map("read_at")
+  metadata  Json?               @db.JsonB
+  createdAt DateTime            @default(now()) @map("created_at")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+
+  // Relationships
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], name: "idx_notifications_user_id")
+  @@index([status], name: "idx_notifications_status")
+  @@index([type])
+  @@index([createdAt], name: "idx_notifications_created_at")
+  @@map("notifications")
+}
+
+/// Immutable audit trail for every financial and system operation.
+model AuditLog {
+  id         String      @id @default(cuid())
+  actorId    String?     @map("actor_id")
+  actorPhone String?     @map("actor_phone") @db.VarChar(20)
+  action     AuditAction
+  entity     String      @db.VarChar(50) // "Payment", "Deposit", "Refund", "House", "Setting"
+  entityId   String      @map("entity_id") @db.VarChar(100)
+  before     Json?       @db.JsonB
+  after      Json?       @db.JsonB
+  ipAddress  String?     @map("ip_address") @db.VarChar(45)
+  userAgent  String?     @map("user_agent") @db.Text
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  // Relationships
+  actor User? @relation("UserAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId], name: "idx_audit_logs_actor_id")
+  @@index([action])
+  @@index([entity, entityId])
+  @@index([createdAt], name: "idx_audit_logs_created_at")
+  @@map("audit_logs")
+}
+
+/// Colony-wide configuration singleton.
+model Setting {
+  id                    String   @id @default("default")
+  colonyName            String   @default("Residential Welfare Association") @map("colony_name") @db.VarChar(150)
+  logoUrl               String?  @map("logo_url") @db.VarChar(500)
+  address               String?  @db.Text
+  contactPhone          String?  @map("contact_phone") @db.VarChar(20)
+  contactEmail          String?  @map("contact_email") @db.VarChar(100)
+  depositRules          Json     @default("{}") @map("deposit_rules") @db.JsonB
+  lateFeeRules          Json     @default("{}") @map("late_fee_rules") @db.JsonB
+  enabledPaymentMethods String[] @default(["UPI", "NET_BANKING", "DEBIT_CARD", "CREDIT_CARD", "CASH", "CHEQUE", "BANK_TRANSFER"]) @map("enabled_payment_methods")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
