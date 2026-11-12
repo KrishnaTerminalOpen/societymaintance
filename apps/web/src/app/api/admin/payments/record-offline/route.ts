@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { prisma, PaymentStatus, DepositStatus, PaymentMethod, AuditAction } from '@colony/database';
 import { RecordOfflinePaymentSchema, formatPaiseToINR } from '@colony/shared/edge';
+import { invalidateDashboardCaches } from '@colony/shared';
 
 export async function POST(req: NextRequest) {
   try {
@@ -130,6 +131,8 @@ export async function POST(req: NextRequest) {
         depositStatus: newStatus,
       };
     });
+
+    await invalidateDashboardCaches(userId);
 
     return NextResponse.json({
       success: true,

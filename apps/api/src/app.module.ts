@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
+import { HealthController } from './health/health.controller';
 import { AppService } from './app.service';
 import { PaymentsModule } from './payments/payments.module';
 import { StorageModule } from './storage/storage.module';
@@ -30,7 +31,7 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
     PaymentsModule,
     ReconciliationModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService],
 })
 export class AppModule {}

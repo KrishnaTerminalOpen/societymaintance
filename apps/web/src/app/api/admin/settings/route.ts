@@ -1,41 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { prisma, AuditAction } from '@colony/database';
+import { cacheService, CacheKeys, invalidateSettingsCache } from '@colony/shared';
 
 export async function GET(req: NextRequest) {
   try {
     await requireAuth(req, ['ADMIN', 'SUPER_ADMIN']);
 
-    let setting = await prisma.setting.findUnique({
-      where: { id: 'default' },
-    });
+    const setting = await cacheService.getOrSet(
+      CacheKeys.settings(),
+      async () => {
+        let dbSetting = await prisma.setting.findUnique({
+          where: { id: 'default' },
+        });
 
-    if (!setting) {
-      setting = await prisma.setting.create({
-        data: {
-          id: 'default',
-          colonyName: 'Greenwood Palms Resident Welfare Association',
-          depositRules: {
-            standardDepositPaise: {
-              FLAT_1BHK: 2500000,
-              FLAT_2BHK: 4000000,
-              FLAT_3BHK: 6000000,
-              FLAT_4BHK: 8000000,
-              VILLA: 12000000,
+        if (!dbSetting) {
+          dbSetting = await prisma.setting.create({
+            data: {
+              id: 'default',
+              colonyName: 'Greenwood Palms Resident Welfare Association',
+              depositRules: {
+                standardDepositPaise: {
+                  FLAT_1BHK: 2500000,
+                  FLAT_2BHK: 4000000,
+                  FLAT_3BHK: 6000000,
+                  FLAT_4BHK: 8000000,
+                  VILLA: 12000000,
+                },
+                maxInstallmentsAllowed: 2,
+                refundablePercentage: 100,
+              },
+              lateFeeRules: {
+                gracePeriodDays: 10,
+                fixedLateFeePaise: 50000,
+              },
+              enabledPaymentMethods: ['UPI', 'NET_BANKING', 'DEBIT_CARD', 'CREDIT_CARD', 'CASH', 'CHEQUE'],
             },
-            maxInstallmentsAllowed: 2,
-            refundablePercentage: 100,
-          },
-          lateFeeRules: {
-            gracePeriodDays: 10,
-            fixedLateFeePaise: 50000,
-          },
-          enabledPaymentMethods: ['UPI', 'NET_BANKING', 'DEBIT_CARD', 'CREDIT_CARD', 'CASH', 'CHEQUE'],
-        },
-      });
-    }
+          });
+        }
+        return dbSetting;
+      },
+      3600, // 1 hour cache
+    );
 
-    return NextResponse.json({ setting });
+    return NextResponse.json(
+      { setting },
+      {
+        headers: {
+          'Cache-Control': 'public, s-maxage=3600, stale-while-revalidate=7200',
+        },
+      },
+    );
   } catch (error: any) {
     console.error('Error fetching settings:', error);
     return NextResponse.json({ error: error.message || 'Failed to fetch settings' }, { status: 500 });
@@ -68,6 +83,9 @@ export async function PATCH(req: NextRequest) {
       },
     });
 
+    // Invalidate Redis cache immediately
+    await invalidateSettingsCache();
+
     // Audit log
     await prisma.auditLog.create({
       data: {
@@ -89,4 +107,3 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: error.message || 'Failed to update settings' }, { status: 400 });
   }
 }
-

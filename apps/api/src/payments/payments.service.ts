@@ -11,7 +11,7 @@ import { Queue } from 'bullmq';
 import { InjectQueue } from '@nestjs/bullmq';
 import { prisma, PaymentStatus, DepositStatus, PaymentMethod, AuditAction } from '@colony/database';
 import { RazorpayGateway } from './gateways/razorpay.gateway';
-import { formatPaiseToINR, UserRole } from '@colony/shared';
+import { formatPaiseToINR, UserRole, invalidateDashboardCaches } from '@colony/shared';
 
 export interface CreateOrderDto {
   depositId: string;
@@ -480,6 +480,9 @@ export class PaymentsService {
         excessRefunded: Number(excessPaise),
       };
     });
+
+    // Invalidate Redis dashboard caches
+    await invalidateDashboardCaches(payment.userId);
 
     // 4. Asynchronously enqueue PDF Receipt Generation & Notification (Non-blocking)
     if (result.success && result.paymentId && this.receiptsQueue) {

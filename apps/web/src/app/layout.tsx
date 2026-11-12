@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import ReactQueryProvider from '@/components/providers/query-provider';
+import ServiceWorkerRegister from '@/components/providers/service-worker-register';
 import Script from 'next/script';
 
 export const metadata: Metadata = {
@@ -34,6 +35,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" href="/icons/icon.svg" />
       </head>
       <body className="min-h-screen bg-slate-50 font-sans antialiased">
+        <ServiceWorkerRegister />
         <ReactQueryProvider>
           {children}
         </ReactQueryProvider>

@@ -22,3 +22,4 @@ export * from './auth/sms/msg91.provider';
 export * from './auth/sms/twilio.provider';
 export * from './auth/sms/console.provider';
 export * from './auth/sms/sms-provider.factory';
+export * from './cache/cache.service';

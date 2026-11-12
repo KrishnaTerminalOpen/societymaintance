@@ -1,0 +1,64 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 30
+      arrivalRate: 10
+      rampTo: 50
+      name: 'Warm up phase'
+    - duration: 60
+      arrivalRate: 50
+      rampTo: 200
+      name: 'Ramping to 500 concurrent users'
+    - duration: 90
+      arrivalRate: 200
+      rampTo: 500
+      name: 'Peak blast 1000 concurrent users'
+  plugins:
+    expect: {}
+  ensure:
+    p95: 500 # Ensure 95th percentile stays below 500ms
+    maxErrorRate: 1
+
+scenarios:
+  - name: 'Resident Payment Journey Under Load'
+    flow:
+      - post:
+          url: '/api/auth/send-otp'
+          json:
+            phone: '9876543210'
+          capture:
+            - json: '$.message'
+              as: 'otpMsg'
+      - think: 1
+      - post:
+          url: '/api/auth/verify-otp'
+          json:
+            phone: '9876543210'
+            otp: '123456'
+          capture:
+            - json: '$.accessToken'
+              as: 'token'
+      - think: 1
+      - get:
+          url: '/api/resident/dashboard'
+          headers:
+            Authorization: 'Bearer {{ token }}'
+          expect:
+            - statusCode: 200
+      - think: 2
+      - post:
+          url: '/api/payments/create-order'
+          headers:
+            Authorization: 'Bearer {{ token }}'
+          json:
+            amount: 500000
+            idempotencyKey: 'artillery_{{ $randomNumber(10000, 99999) }}_{{ $timestamp }}'
+      - think: 1
+      - post:
+          url: '/api/payments/verify'
+          headers:
+            Authorization: 'Bearer {{ token }}'
+          json:
+            orderId: 'order_art_{{ $randomNumber(1000, 9999) }}'
+            paymentId: 'pay_art_{{ $randomNumber(1000, 9999) }}'
+            signature: 'sig_mock_validation'

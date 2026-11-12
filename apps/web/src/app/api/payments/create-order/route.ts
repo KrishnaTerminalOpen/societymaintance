@@ -1,11 +1,36 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ACCESS_COOKIE_NAME } from '@/lib/auth';
+import { cacheService } from '@colony/shared';
 
 export async function POST(req: NextRequest) {
   try {
     const accessToken = req.cookies.get(ACCESS_COOKIE_NAME)?.value;
     if (!accessToken) {
       return NextResponse.json({ error: 'Unauthorized: Please log in.' }, { status: 401 });
+    }
+
+    const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+
+    // Rate limiting: max 10 order creations per 60 seconds per IP
+    const rateCheck = await cacheService.checkRateLimit({
+      key: `payment:create-order:${clientIp}`,
+      limit: 10,
+      windowSeconds: 60,
+    });
+
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many payment requests. Please wait a moment before trying again.' },
+        {
+          status: 429,
+          headers: {
+            'Retry-After': rateCheck.resetSeconds.toString(),
+            'X-RateLimit-Limit': '10',
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': rateCheck.resetSeconds.toString(),
+          },
+        },
+      );
     }
 
     const body = await req.json();
@@ -16,14 +41,21 @@ export async function POST(req: NextRequest) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${accessToken}`,
-        'x-forwarded-for': req.headers.get('x-forwarded-for') || '127.0.0.1',
+        'x-forwarded-for': clientIp,
         'user-agent': req.headers.get('user-agent') || 'ColonyWeb',
       },
       body: JSON.stringify(body),
     });
 
     const data = await apiRes.json();
-    return NextResponse.json(data, { status: apiRes.status });
+    return NextResponse.json(data, {
+      status: apiRes.status,
+      headers: {
+        'X-RateLimit-Limit': '10',
+        'X-RateLimit-Remaining': rateCheck.remaining.toString(),
+        'X-RateLimit-Reset': rateCheck.resetSeconds.toString(),
+      },
+    });
   } catch (error) {
     console.error('Error in proxy /api/payments/create-order:', error);
     return NextResponse.json(
@@ -32,4 +64,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

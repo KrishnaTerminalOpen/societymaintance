@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
@@ -40,15 +41,14 @@ import {
   Check,
   AlertOctagon,
 } from 'lucide-react';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from 'recharts';
+const CollectionChart = dynamic(() => import('@/components/admin/CollectionChart'), {
+  ssr: false,
+  loading: () => (
+    <div className="h-64 flex items-center justify-center text-xs text-slate-400">
+      Loading chart analytics...
+    </div>
+  ),
+});
 import { formatPaiseToINR } from '@colony/shared/edge';
 
 type AdminTab =
@@ -137,6 +137,36 @@ export default function AdminPortalPage() {
   const [reviewReason, setReviewReason] = useState('');
   const [customRefundRupees, setCustomRefundRupees] = useState('');
   const [reconciliationFeedback, setReconciliationFeedback] = useState<string | null>(null);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+
+  // Real-Time Server-Sent Events (SSE) for Admin Dashboard
+  React.useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/events?channel=admin');
+
+      es.addEventListener('connected', () => {
+        setIsLiveConnected(true);
+      });
+
+      es.addEventListener('PAYMENT_RECEIVED', () => {
+        queryClient.invalidateQueries({ queryKey: ['admin-dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['admin-payments-list'] });
+      });
+
+      es.addEventListener('REFUND_REQUESTED', () => {
+        queryClient.invalidateQueries({ queryKey: ['admin-refunds-list'] });
+      });
+
+      es.onerror = () => {
+        setIsLiveConnected(false);
+      };
+    } catch {}
+
+    return () => {
+      es?.close();
+    };
+  }, [queryClient]);
 
   // ============================================================================
   // Fetch Current Admin Context
@@ -845,36 +875,7 @@ export default function AdminPortalPage() {
                   <h4 className="text-sm font-bold text-slate-900">Collections Timeline (Last 14 Days)</h4>
                   <p className="text-xs text-slate-500">Daily collections in Indian Rupees (₹)</p>
                 </div>
-                <div className="h-64 w-full">
-                  {dashData?.chartData ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={dashData.chartData}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />
-                        <YAxis
-                          tick={{ fontSize: 11, fill: '#64748b' }}
-                          axisLine={false}
-                          tickLine={false}
-                          tickFormatter={(v) => `₹${v / 1000}k`}
-                        />
-                        <Tooltip
-                          formatter={(value: any) => [`₹${Number(value).toLocaleString('en-IN')}`, 'Collected']}
-                          contentStyle={{
-                            backgroundColor: '#0f172a',
-                            borderRadius: '8px',
-                            color: '#fff',
-                            fontSize: '12px',
-                          }}
-                        />
-                        <Bar dataKey="amountRupees" fill="#2563eb" radius={[6, 6, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-xs text-slate-400">
-                      Loading chart...
-                    </div>
-                  )}
-                </div>
+                <CollectionChart data={dashData?.chartData} />
               </div>
 
               {/* Recent Verified Payments Table */}

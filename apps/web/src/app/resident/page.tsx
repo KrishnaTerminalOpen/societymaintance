@@ -131,6 +131,36 @@ export default function ResidentPortalPage() {
     },
   });
 
+  // Real-Time Server-Sent Events (SSE) for Resident Updates
+  React.useEffect(() => {
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource('/api/events?channel=resident');
+
+      es.addEventListener('PAYMENT_RECEIVED', () => {
+        queryClient.invalidateQueries({ queryKey: ['resident-dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-payments'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-notifications'] });
+      });
+
+      es.addEventListener('PAYMENT_UPDATED', () => {
+        queryClient.invalidateQueries({ queryKey: ['resident-dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-payments'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-notifications'] });
+      });
+
+      es.addEventListener('REFUND_PROCESSED', () => {
+        queryClient.invalidateQueries({ queryKey: ['resident-dashboard'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-refunds'] });
+        queryClient.invalidateQueries({ queryKey: ['resident-notifications'] });
+      });
+    } catch {}
+
+    return () => {
+      es?.close();
+    };
+  }, [queryClient]);
+
   // ============================================================================
   // Logout Mutation
   // ============================================================================
