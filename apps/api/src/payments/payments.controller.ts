@@ -69,3 +69,4 @@ export class PaymentsController {
     return { success: true, resolvedPaymentsCount: resolved };
   }
 }
+

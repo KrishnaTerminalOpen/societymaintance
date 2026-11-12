@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="128" fill="#2563eb"/>
+  <path d="M256 120L128 220V392H216V280H296V392H384V220L256 120Z" fill="#ffffff"/>
+  <circle cx="340" cy="300" r="40" fill="#38bdf8"/>
+  <text x="340" y="315" font-family="sans-serif" font-size="44" font-weight="bold" fill="#0f172a" text-anchor="middle">₹</text>
+</svg>
