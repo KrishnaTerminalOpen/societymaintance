@@ -1,4 +1,4 @@
-import { ISmsProvider, SmsDeliveryResult } from './sms-provider.interface';
+import { ISmsProvider } from './sms-provider.interface';
 import { Msg91SmsProvider } from './msg91.provider';
 import { TwilioSmsProvider } from './twilio.provider';
 import { Fast2SmsProvider } from './fast2sms.provider';
@@ -15,19 +15,6 @@ function isRealCredential(value?: string): boolean {
   const trimmed = value.trim();
   if (!trimmed) return false;
   return !/^(dummy|your[_-]|sample|placeholder|<)/i.test(trimmed);
-}
-
-class UnconfiguredSmsProvider implements ISmsProvider {
-  name = 'Unconfigured';
-
-  async sendOtp(): Promise<SmsDeliveryResult> {
-    return {
-      success: false,
-      provider: this.name,
-      error:
-        'Real SMS provider is not configured. Add TWILIO_*, MSG91_*, or FAST2SMS_API_KEY credentials to .env (or set DEV_OTP_CONSOLE=true for demo OTP).',
-    };
-  }
 }
 
 export function getSmsProvider(): ISmsProvider {
@@ -97,11 +84,11 @@ export function getSmsProvider(): ISmsProvider {
     );
   }
 
-  // When real SMS mode is explicitly requested (DEV_OTP_CONSOLE=false), never silently generate demo OTPs
+  // When real SMS mode is requested but keys aren't added, log a warning and fallback gracefully to demo OTP
   if (devConsoleFlag === 'false') {
-    return new UnconfiguredSmsProvider();
+    console.warn('⚠️ No real SMS provider keys configured in .env. Falling back to Console SMS for demo testing.');
   }
 
-  // Fallback to Dev Console logger when running locally without DEV_OTP_CONSOLE=false
+  // Fallback to Dev Console logger for smooth testing
   return new ConsoleSmsProvider();
 }

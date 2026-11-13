@@ -629,11 +629,13 @@ export default function ResidentPortalPage() {
                             <>
                               Due on{' '}
                               <span className="font-semibold text-white">
-                                {new Date(dashboardData.deposit.dueDate).toLocaleDateString('en-IN', {
-                                  day: '2-digit',
-                                  month: 'short',
-                                  year: 'numeric',
-                                })}
+                                {dashboardData?.deposit?.dueDate
+                                  ? new Date(dashboardData.deposit.dueDate).toLocaleDateString('en-IN', {
+                                      day: '2-digit',
+                                      month: 'short',
+                                      year: 'numeric',
+                                    })
+                                  : 'N/A'}
                               </span>
                             </>
                           )}
