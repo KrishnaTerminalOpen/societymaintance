@@ -16,17 +16,13 @@ import {
   Clock,
   AlertTriangle,
   AlertCircle,
-  ExternalLink,
   ChevronRight,
   ShieldCheck,
   RotateCw,
   PlusCircle,
   Download,
   X,
-  Mail,
   Phone,
-  Calendar,
-  Sparkles,
 } from 'lucide-react';
 import { formatPaiseToINR } from '@colony/shared/edge';
 
@@ -63,7 +59,7 @@ export default function ResidentPortalPage() {
   // ============================================================================
   // TanStack Query: Fetch Profile
   // ============================================================================
-  const { data: profileData, isLoading: isProfileLoading } = useQuery({
+  const { data: profileData } = useQuery({
     queryKey: ['resident-profile'],
     queryFn: async () => {
       const res = await fetch('/api/resident/profile');
@@ -110,7 +106,7 @@ export default function ResidentPortalPage() {
   // ============================================================================
   // TanStack Query: Fetch Refunds & Tracker
   // ============================================================================
-  const { data: refundsData, isLoading: isRefundsLoading, refetch: refetchRefunds } = useQuery({
+  const { data: refundsData, isLoading: isRefundsLoading } = useQuery({
     queryKey: ['resident-refunds'],
     queryFn: async () => {
       const res = await fetch('/api/resident/refunds');
@@ -122,7 +118,7 @@ export default function ResidentPortalPage() {
   // ============================================================================
   // TanStack Query: Fetch Notifications
   // ============================================================================
-  const { data: notifData, isLoading: isNotifLoading, refetch: refetchNotifs } = useQuery({
+  const { data: notifData, isLoading: isNotifLoading } = useQuery({
     queryKey: ['resident-notifications'],
     queryFn: async () => {
       const res = await fetch('/api/resident/notifications');
@@ -154,7 +150,9 @@ export default function ResidentPortalPage() {
         queryClient.invalidateQueries({ queryKey: ['resident-refunds'] });
         queryClient.invalidateQueries({ queryKey: ['resident-notifications'] });
       });
-    } catch {}
+    } catch {
+      // EventSource not supported in environment
+    }
 
     return () => {
       es?.close();

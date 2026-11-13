@@ -74,41 +74,120 @@ export class InMemoryCacheStore implements ICacheStore {
 }
 
 /**
- * Real Redis implementation wrapping ioredis
+ * Real Redis implementation wrapping ioredis with automatic In-Memory fallback
+ * whenever Redis is unreachable or offline.
  */
 export class RedisCacheStore implements ICacheStore {
-  constructor(private client: Redis) {}
+  private useFallback = false;
+  private warnedFallback = false;
+
+  constructor(
+    private client: Redis,
+    private fallback: ICacheStore = new InMemoryCacheStore(),
+  ) {
+    if (typeof (this.client as unknown as { on?: unknown }).on === 'function') {
+      this.client.on('error', (err) => {
+        this.activateFallback(err);
+      });
+      this.client.on('ready', () => {
+        this.useFallback = false;
+      });
+    }
+  }
+
+  private activateFallback(err?: unknown): void {
+    this.useFallback = true;
+    if (!this.warnedFallback) {
+      this.warnedFallback = true;
+      const msg = err instanceof Error ? err.message : String(err || 'Connection unavailable');
+      console.warn('⚠️ Redis unreachable, falling back to In-Memory cache store:', msg);
+    }
+  }
+
+  private async withFallback<T>(
+    redisOp: () => Promise<T>,
+    fallbackOp: () => Promise<T>,
+  ): Promise<T> {
+    const status = (this.client as unknown as { status?: string }).status;
+    if (this.useFallback || status === 'end') {
+      return fallbackOp();
+    }
+
+    try {
+      const connectFn = (this.client as unknown as { connect?: () => Promise<void> }).connect;
+      if (status === 'wait' && typeof connectFn === 'function') {
+        await connectFn.call(this.client);
+      }
+      return await redisOp();
+    } catch (err) {
+      this.activateFallback(err);
+      return fallbackOp();
+    }
+  }
 
   async get(key: string): Promise<string | null> {
-    return this.client.get(key);
+    return this.withFallback(
+      () => this.client.get(key),
+      () => this.fallback.get(key),
+    );
   }
 
   async setex(key: string, seconds: number, value: string): Promise<void> {
-    await this.client.setex(key, seconds, value);
+    await this.withFallback<void>(
+      async () => {
+        await this.client.setex(key, seconds, value);
+      },
+      () => this.fallback.setex(key, seconds, value),
+    );
   }
 
   async del(key: string): Promise<void> {
-    await this.client.del(key);
+    await this.withFallback<void>(
+      async () => {
+        await this.client.del(key);
+      },
+      () => this.fallback.del(key),
+    );
   }
 
   async incr(key: string): Promise<number> {
-    return this.client.incr(key);
+    return this.withFallback<number>(
+      () => this.client.incr(key),
+      () => this.fallback.incr(key),
+    );
   }
 
   async expire(key: string, seconds: number): Promise<void> {
-    await this.client.expire(key, seconds);
+    await this.withFallback<void>(
+      async () => {
+        await this.client.expire(key, seconds);
+      },
+      () => this.fallback.expire(key, seconds),
+    );
   }
 
   async ttl(key: string): Promise<number> {
-    return this.client.ttl(key);
+    return this.withFallback<number>(
+      () => this.client.ttl(key),
+      () => this.fallback.ttl(key),
+    );
   }
 
   async flush(): Promise<void> {
-    await this.client.flushdb();
+    await this.withFallback<void>(
+      async () => {
+        await this.client.flushdb();
+      },
+      () => this.fallback.flush(),
+    );
   }
 }
 
-let activeStore: ICacheStore | null = null;
+const globalForCache = globalThis as unknown as {
+  __colonyCacheStore?: ICacheStore;
+};
+
+let activeStore: ICacheStore | null = globalForCache.__colonyCacheStore ?? null;
 
 export function getCacheStore(): ICacheStore {
   if (activeStore) {
@@ -117,9 +196,11 @@ export function getCacheStore(): ICacheStore {
 
   const redisUrl = process.env.REDIS_URL;
   const isTest = process.env.NODE_ENV === 'test';
+  const fallbackStore = new InMemoryCacheStore();
 
   if (!redisUrl || isTest) {
-    activeStore = new InMemoryCacheStore();
+    activeStore = fallbackStore;
+    globalForCache.__colonyCacheStore = activeStore;
     return activeStore;
   }
 
@@ -127,25 +208,22 @@ export function getCacheStore(): ICacheStore {
     const redis = new Redis(redisUrl, {
       maxRetriesPerRequest: 1,
       enableOfflineQueue: false,
-      connectTimeout: 2000,
+      connectTimeout: 1000,
       lazyConnect: true,
+      retryStrategy: () => null,
     });
 
-    redis.on('error', (err) => {
-      if (!activeStore || !(activeStore instanceof InMemoryCacheStore)) {
-        console.warn('⚠️ Redis unreachable, falling back to In-Memory cache store:', err.message);
-        activeStore = new InMemoryCacheStore();
-      }
-    });
-
-    activeStore = new RedisCacheStore(redis);
+    activeStore = new RedisCacheStore(redis, fallbackStore);
+    globalForCache.__colonyCacheStore = activeStore;
     return activeStore;
   } catch {
-    activeStore = new InMemoryCacheStore();
+    activeStore = fallbackStore;
+    globalForCache.__colonyCacheStore = activeStore;
     return activeStore;
   }
 }
 
 export function setCacheStore(store: ICacheStore): void {
   activeStore = store;
+  globalForCache.__colonyCacheStore = store;
 }

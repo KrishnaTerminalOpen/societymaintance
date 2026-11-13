@@ -161,7 +161,9 @@ export default function AdminPortalPage() {
       es.onerror = () => {
         setIsLiveConnected(false);
       };
-    } catch {}
+    } catch {
+      // EventSource unsupported in current environment
+    }
 
     return () => {
       es?.close();

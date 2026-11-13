@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSessionUser } from '@/lib/auth';
 import { prisma, RefundStatus, AuditAction } from '@colony/database';
-import { CreateRefundSchema, rupeesToPaise } from '@colony/shared/edge';
+import { CreateRefundSchema } from '@colony/shared/edge';
 
 export async function GET(req: NextRequest) {
   try {

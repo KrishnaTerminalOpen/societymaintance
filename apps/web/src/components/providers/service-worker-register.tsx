@@ -9,7 +9,7 @@ export default function ServiceWorkerRegister() {
         navigator.serviceWorker
           .register('/sw.js')
           .then((reg) => {
-            console.log('[ColonyDeposit PWA] Service worker registered:', reg.scope);
+            console.info('[ColonyDeposit PWA] Service worker registered:', reg.scope);
           })
           .catch((err) => {
             console.warn('[ColonyDeposit PWA] Service worker registration failed:', err);

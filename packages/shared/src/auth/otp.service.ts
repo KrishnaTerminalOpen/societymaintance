@@ -18,7 +18,7 @@ export interface OtpServiceConfig {
 
 export class OtpService {
   private cache: ICacheStore;
-  private smsProvider: ISmsProvider;
+  private explicitSmsProvider?: ISmsProvider;
   private config: Required<OtpServiceConfig>;
 
   constructor(
@@ -27,7 +27,7 @@ export class OtpService {
     customConfig?: OtpServiceConfig,
   ) {
     this.cache = cacheStore || getCacheStore();
-    this.smsProvider = smsProvider || getSmsProvider();
+    this.explicitSmsProvider = smsProvider;
     this.config = {
       otpLength: 6,
       expirySeconds: 300, // 5 minutes
@@ -118,8 +118,9 @@ export class OtpService {
     await this.cache.setex(attemptsKey, this.config.expirySeconds, '0');
     await this.cache.setex(cooldownKey, this.config.cooldownSeconds, 'active');
 
-    // 6. Send OTP via Swappable SMS Provider (MSG91 / Twilio / Dev Console)
-    const sendResult = await this.smsProvider.sendOtp(cleanPhone, otp);
+    // 6. Send OTP via Swappable SMS Provider (Twilio / MSG91 / Fast2SMS / Dev Console)
+    const activeProvider = this.explicitSmsProvider || getSmsProvider();
+    const sendResult = await activeProvider.sendOtp(cleanPhone, otp);
     if (!sendResult.success) {
       // Clean up stored OTP if dispatch failed
       await this.cache.del(hashKey);
@@ -133,12 +134,15 @@ export class OtpService {
     }
 
     const isDev = process.env.NODE_ENV !== 'production';
+    const isDemoConsole = activeProvider.name === 'DevConsole';
 
     return {
       success: true,
       cooldownSeconds: this.config.cooldownSeconds,
-      message: 'OTP sent successfully to your registered mobile number.',
-      devOtp: isDev ? otp : undefined,
+      message: isDemoConsole
+        ? 'Dev OTP generated (SMS provider in console mode).'
+        : `OTP sent via ${activeProvider.name} to your mobile number.`,
+      devOtp: isDev && isDemoConsole ? otp : undefined,
     };
   }
 

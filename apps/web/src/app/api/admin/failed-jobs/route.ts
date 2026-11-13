@@ -45,11 +45,12 @@ export async function GET(req: NextRequest) {
         failedAt: notif.updatedAt,
       })),
     });
-  } catch (err: any) {
-    if (err.message?.includes('Unauthorized') || err.message?.includes('Forbidden')) {
-      return NextResponse.json({ error: err.message }, { status: 403 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal server error';
+    if (message.includes('Unauthorized') || message.includes('Forbidden')) {
+      return NextResponse.json({ error: message }, { status: 403 });
     }
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -98,11 +99,12 @@ export async function POST(req: NextRequest) {
       message: 'Failed job successfully retried and delivered.',
       data: updated,
     });
-  } catch (err: any) {
-    if (err.message?.includes('Unauthorized') || err.message?.includes('Forbidden')) {
-      return NextResponse.json({ error: err.message }, { status: 403 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal server error';
+    if (message.includes('Unauthorized') || message.includes('Forbidden')) {
+      return NextResponse.json({ error: message }, { status: 403 });
     }
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

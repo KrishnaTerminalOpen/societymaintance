@@ -145,5 +145,11 @@ describe('OtpService', () => {
     expect(blockedRes.success).toBe(false);
     expect(blockedRes.message).toContain('Too many requests from this IP address');
   });
+
+  it('does not expose devOtp when a real SMS provider is active', async () => {
+    const res = await otpService.requestOtp(testPhone, testIp);
+    expect(res.success).toBe(true);
+    expect(res.devOtp).toBeUndefined();
+  });
 });
 

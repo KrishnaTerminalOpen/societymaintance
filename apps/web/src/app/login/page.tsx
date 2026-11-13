@@ -95,9 +95,7 @@ function LoginForm() {
       setStep('OTP');
       setCooldown(data.cooldownSeconds || 30);
       setSuccessMessage('OTP sent to +91 ' + phone);
-      if (data.devOtp) {
-        setDevOtpCode(data.devOtp);
-      }
+      setDevOtpCode(data.devOtp || null);
       setAttemptsLeft(3);
 
       // Auto-focus first OTP input box on next render

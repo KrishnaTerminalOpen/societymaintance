@@ -111,7 +111,9 @@ export async function GET(req: NextRequest) {
         clearInterval(interval);
         try {
           controller.close();
-        } catch {}
+        } catch {
+          // Stream already closed or detached
+        }
       });
     },
     cancel() {

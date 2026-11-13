@@ -50,6 +50,7 @@ packages/database/prisma/*.db-journal
 # Turborepo & caches
 .turbo
 .cache
+*.tsbuildinfo
 
 # Coverage directory used by tools like istanbul
 coverage/

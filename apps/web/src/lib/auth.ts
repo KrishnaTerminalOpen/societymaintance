@@ -9,7 +9,6 @@ import {
   canAccessResidentData,
   hasRole,
 } from '@colony/shared';
-import { prisma } from '@colony/database';
 
 export const ACCESS_COOKIE_NAME = 'colony_access_token';
 export const REFRESH_COOKIE_NAME = 'colony_refresh_token';

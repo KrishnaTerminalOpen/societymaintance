@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requireAuth } from '@/lib/auth';
-import { prisma, DepositStatus, AuditAction, NotificationStatus } from '@colony/database';
+import { prisma, DepositStatus, AuditAction, NotificationStatus, Prisma } from '@colony/database';
 import { formatPaiseToINR } from '@colony/shared';
 
 const SendReminderSchema = z.object({
@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Bulk Reminders with Batching
-    const where: any = {};
+    const where: Prisma.DepositWhereInput = {};
     if (depositStatus === 'OVERDUE') {
       where.status = DepositStatus.OVERDUE;
     } else if (depositStatus === 'PENDING') {
@@ -206,11 +206,12 @@ export async function POST(req: NextRequest) {
       count: notificationsCreated,
       batches: batches.length,
     });
-  } catch (err: any) {
-    if (err.message?.includes('Unauthorized') || err.message?.includes('Forbidden')) {
-      return NextResponse.json({ error: err.message }, { status: 403 });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Internal server error';
+    if (message.includes('Unauthorized') || message.includes('Forbidden')) {
+      return NextResponse.json({ error: message }, { status: 403 });
     }
-    return NextResponse.json({ error: err.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 

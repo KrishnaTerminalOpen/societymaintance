@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
-import Razorpay from 'razorpay';
+import type RazorpayType from 'razorpay';
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const RazorpayModule = require('razorpay');
+const RazorpayCtor = (RazorpayModule?.default ?? RazorpayModule) as typeof RazorpayType;
 import {
   IPaymentGateway,
   CreateGatewayOrderParams,
@@ -16,7 +19,7 @@ import {
 export class RazorpayGateway implements IPaymentGateway {
   readonly name = 'Razorpay';
   private readonly logger = new Logger(RazorpayGateway.name);
-  private razorpayClient: Razorpay | null = null;
+  private razorpayClient: RazorpayType | null = null;
   private isTestMode: boolean;
   private keyId: string;
   private keySecret: string;
@@ -40,7 +43,7 @@ export class RazorpayGateway implements IPaymentGateway {
     if (this.isMockMode) {
       this.logger.warn('⚠️ Razorpay configured with dummy/mock credentials. Mock Gateway Active.');
     } else {
-      this.razorpayClient = new Razorpay({
+      this.razorpayClient = new RazorpayCtor({
         key_id: this.keyId,
         key_secret: this.keySecret,
       });

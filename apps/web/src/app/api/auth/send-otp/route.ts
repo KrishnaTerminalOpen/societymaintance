@@ -15,16 +15,47 @@ export async function POST(req: NextRequest) {
     }
 
     const { phone } = parseResult.data;
+    const normalizedLast10 = phone.slice(-10);
 
     // Check if user is registered in the colony system
-    const user = await prisma.user.findFirst({
+    let user = await prisma.user.findFirst({
       where: {
         phone: {
-          endsWith: phone.slice(-10), // Matches with or without +91
+          endsWith: normalizedLast10, // Matches with or without +91
         },
         deletedAt: null,
       },
     });
+
+    // Temporary open-login mode: auto-provision valid unregistered numbers as RESIDENT
+    if (!user && process.env.ALLOW_OPEN_LOGIN === 'true') {
+      const existingDeleted = await prisma.user.findFirst({
+        where: {
+          phone: {
+            endsWith: normalizedLast10,
+          },
+        },
+      });
+
+      if (existingDeleted) {
+        user = await prisma.user.update({
+          where: { id: existingDeleted.id },
+          data: {
+            deletedAt: null,
+            status: 'ACTIVE',
+          },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            phone: `+91${normalizedLast10}`,
+            name: `Resident ${normalizedLast10.slice(-4)}`,
+            role: 'RESIDENT',
+            status: 'ACTIVE',
+          },
+        });
+      }
+    }
 
     if (!user) {
       return NextResponse.json(
@@ -51,12 +82,13 @@ export async function POST(req: NextRequest) {
     const result = await otpService.requestOtp(user.phone, clientIp);
 
     if (!result.success) {
+      const status = result.cooldownSeconds > 0 || /too many/i.test(result.message) ? 429 : 503;
       return NextResponse.json(
         {
           error: result.message,
           cooldownSeconds: result.cooldownSeconds,
         },
-        { status: 429 },
+        { status },
       );
     }
 
@@ -68,8 +100,16 @@ export async function POST(req: NextRequest) {
     });
   } catch (error) {
     console.error('Error in /api/auth/send-otp:', error);
+    const isDbInitError =
+      process.env.NODE_ENV !== 'production' &&
+      error instanceof Error &&
+      error.name === 'PrismaClientInitializationError';
     return NextResponse.json(
-      { error: 'An unexpected error occurred while sending OTP. Please try again.' },
+      {
+        error: isDbInitError
+          ? 'Database connection failed. Ensure PostgreSQL is running, DATABASE_URL is configured, and migrations/seed have been run.'
+          : 'An unexpected error occurred while sending OTP. Please try again.',
+      },
       { status: 500 },
     );
   }

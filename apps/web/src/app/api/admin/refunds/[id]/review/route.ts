@@ -64,7 +64,7 @@ export async function POST(
       // Rejection Branch
       if (action === 'REJECT') {
         const rejectionNote = reason || 'Refund request rejected by committee admin';
-        const updated = await tx.refund.update({
+        await tx.refund.update({
           where: { id: refund.id },
           data: {
             status: 'FAILED',

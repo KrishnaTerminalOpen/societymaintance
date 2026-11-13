@@ -18,7 +18,7 @@ const UpdateAdminSchema = z.object({
 
 export async function GET(req: NextRequest) {
   try {
-    const auth = await requireAuth(req, ['SUPER_ADMIN']);
+    await requireAuth(req, ['SUPER_ADMIN']);
 
     const admins = await prisma.user.findMany({
       where: {
