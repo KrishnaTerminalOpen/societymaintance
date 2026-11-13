@@ -13,23 +13,27 @@ export class Fast2SmsProvider implements ISmsProvider {
     try {
       const mobile10 = phone.replace(/\D/g, '').slice(-10);
 
-      // Use DLT route if senderId & templateId are provided, otherwise use Fast2SMS OTP route
-      const payload: Record<string, string> =
-        this.senderId && this.templateId
-          ? {
-              route: 'dlt',
-              sender_id: this.senderId,
-              message: this.templateId,
-              variables_values: otp,
-              flash: '0',
-              numbers: mobile10,
-            }
-          : {
-              route: 'otp',
-              variables_values: otp,
-              flash: '0',
-              numbers: mobile10,
-            };
+      // Use DLT route if senderId & templateId are non-empty, otherwise use Fast2SMS Quick OTP route
+      const hasDlt = Boolean(
+        this.senderId && this.senderId.trim().length > 0 &&
+        this.templateId && this.templateId.trim().length > 0
+      );
+
+      const payload: Record<string, string> = hasDlt
+        ? {
+            route: 'dlt',
+            sender_id: this.senderId!.trim(),
+            message: this.templateId!.trim(),
+            variables_values: otp,
+            flash: '0',
+            numbers: mobile10,
+          }
+        : {
+            route: 'otp',
+            variables_values: otp,
+            flash: '0',
+            numbers: mobile10,
+          };
 
       const response = await fetch('https://www.fast2sms.com/dev/bulkV2', {
         method: 'POST',

@@ -59,7 +59,7 @@ export function getSmsProvider(): ISmsProvider {
   }
   if (preferred === 'fast2sms' && hasFast2Sms) {
     return new Fast2SmsProvider(
-      fast2SmsKey!,
+      fast2SmsKey!.trim(),
       process.env.FAST2SMS_SENDER_ID,
       process.env.FAST2SMS_TEMPLATE_ID,
     );
@@ -67,18 +67,18 @@ export function getSmsProvider(): ISmsProvider {
 
   // Auto-select first configured real provider
   if (hasTwilio) {
-    return new TwilioSmsProvider(twilioSid!, twilioToken!, twilioFrom!);
+    return new TwilioSmsProvider(twilioSid!.trim(), twilioToken!.trim(), twilioFrom!.trim());
   }
   if (hasMsg91) {
     return new Msg91SmsProvider(
-      msg91Key!,
-      msg91Template!,
+      msg91Key!.trim(),
+      msg91Template!.trim(),
       process.env.MSG91_SENDER_ID || 'COLONY',
     );
   }
   if (hasFast2Sms) {
     return new Fast2SmsProvider(
-      fast2SmsKey!,
+      fast2SmsKey!.trim(),
       process.env.FAST2SMS_SENDER_ID,
       process.env.FAST2SMS_TEMPLATE_ID,
     );
