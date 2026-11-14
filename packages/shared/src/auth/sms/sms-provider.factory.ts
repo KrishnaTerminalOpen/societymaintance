@@ -48,7 +48,7 @@ export function getSmsProvider(): ISmsProvider {
   const hasFast2Sms = isRealCredential(fast2SmsKey);
 
   if (preferred === 'twilio' && hasTwilio) {
-    return new TwilioSmsProvider(twilioSid!, twilioToken!, twilioFrom!);
+    return new TwilioSmsProvider(twilioSid!.trim(), twilioToken!.trim(), twilioFrom!.trim());
   }
   if (preferred === 'msg91' && hasMsg91) {
     return new Msg91SmsProvider(
